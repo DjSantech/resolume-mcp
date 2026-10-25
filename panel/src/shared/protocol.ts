@@ -135,12 +135,14 @@ export type Command =
   | { action: "stopAutomation" }
   | { action: "skipAutomation" }
   /** Devuelve { mime, data(base64) } en el resultado. Permitido también para observadores. */
-  | { action: "getThumbnail"; clipId: number };
+  | { action: "getThumbnail"; clipId: number }
+  /** Una captura de la salida bajo demanda. Devuelve { mime, data(base64), at }. Permitido para observadores. */
+  | { action: "getSnapshot" };
 
 export type CommandAction = Command["action"];
 
 /** Órdenes que puede mandar un observador (solo lectura). */
-export const VIEWER_ACTIONS: readonly CommandAction[] = ["getThumbnail"];
+export const VIEWER_ACTIONS: readonly CommandAction[] = ["getThumbnail", "getSnapshot"];
 
 // ---------------------------------------------------------------- Puente ⇄ Servidor
 // El puente se conecta a  /ws/bridge?event=<eventId>&name=<nombre>&token=<BRIDGE_TOKEN>

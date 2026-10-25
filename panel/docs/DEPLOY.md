@@ -73,7 +73,7 @@ Abre `https://resolume-panel.onrender.com` en el celular, escribe tu nombre y el
 
 ## Datos móviles
 
-Mientras alguien mira la pestaña **En vivo**, el puente sube una captura de la salida (~180-290 KB) cada 3 s, unos 4-6 MB por minuto. Si el evento usa datos móviles, sube `SNAPSHOT_MS` (por ejemplo 8000) o mira la pestaña Clips, que no pide capturas. Sin nadie mirando no se manda ninguna.
+La pestaña **En vivo** no se actualiza sola: muestra una captura al abrirla y otra cada vez que tocas **Refrescar** (~180-290 KB cada una). Lo demás (estado, clips, registro) pesa muy poco.
 
 ## Seguridad
 

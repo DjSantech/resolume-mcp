@@ -435,16 +435,7 @@ class BridgeImpl {
     if (!this.watchSnapshots || this.stopped || this.snapshotting) return;
     this.snapshotting = true;
     try {
-      if (this.resolumeOnline) {
-        if (this.monitorId === null) {
-          const monitors = (await this.api.call("GET", "/composition/monitors").catch(() => null)) as { id?: number; name?: string }[] | null;
-          this.monitorId = (Array.isArray(monitors) ? monitors.find((m) => m.name === "Composition")?.id : undefined) ?? 1;
-        }
-        const img = await this.api.binary(`/composition/monitors/${this.monitorId}/snapshot.jpg`);
-        // Se pidió .jpg: cualquier tipo raro que declare Resolume se trata como JPEG.
-        const mime = img.mime === "image/png" || img.mime === "image/webp" ? img.mime : "image/jpeg";
-        this.send({ type: "snapshot", mime, data: img.data.toString("base64"), at: Date.now() });
-      }
+      if (this.resolumeOnline) this.send({ type: "snapshot", ...(await this.captureSnapshot()) });
     } catch {
       // Una captura fallida no es grave: se reintenta en la siguiente vuelta.
     } finally {
@@ -453,6 +444,18 @@ class BridgeImpl {
         this.snapshotTimer = setTimeout(() => void this.snapshot(), this.snapshotMs);
       }
     }
+  }
+
+  /** Una captura de la salida (monitor "Composition"). */
+  private async captureSnapshot(): Promise<{ mime: string; data: string; at: number }> {
+    if (this.monitorId === null) {
+      const monitors = (await this.api.call("GET", "/composition/monitors").catch(() => null)) as { id?: number; name?: string }[] | null;
+      this.monitorId = (Array.isArray(monitors) ? monitors.find((m) => m.name === "Composition")?.id : undefined) ?? 1;
+    }
+    const img = await this.api.binary(`/composition/monitors/${this.monitorId}/snapshot.jpg`);
+    // Se pidió .jpg: cualquier tipo raro que declare Resolume se trata como JPEG.
+    const mime = img.mime === "image/png" || img.mime === "image/webp" ? img.mime : "image/jpeg";
+    return { mime, data: img.data.toString("base64"), at: Date.now() };
   }
 
   // ---------------------------------------------------------------- Órdenes
@@ -553,6 +556,8 @@ class BridgeImpl {
         const img = await api.binary(`/composition/clips/by-id/${id}/thumbnail`);
         return { mime: img.mime === "application/octet-stream" ? "image/png" : img.mime, data: img.data.toString("base64") };
       }
+      case "getSnapshot":
+        return await this.captureSnapshot();
       case "saveAutomation": {
         const a = parseAutomation({ ...(cmd.automation ?? {}), updatedAt: Date.now() }, this.minAutomationSeconds);
         if (typeof a === "string") throw new BadCommand(a);

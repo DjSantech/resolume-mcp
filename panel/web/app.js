@@ -153,10 +153,10 @@ function setConnBanner(text) {
 
 // ---------------------------------------------------------------- Suscripción
 
-/** Captura solo si la pestaña En vivo está visible y la página en primer plano. */
+/** Las capturas ya no llegan solas: se piden con el botón Refrescar (getSnapshot) para ahorrar datos. */
 function subscribe() {
   const eventId = S.route === "event" ? S.eventId : null;
-  const snapshots = !!eventId && S.tab === "live" && document.visibilityState === "visible";
+  const snapshots = false;
   const key = `${eventId}|${snapshots}`;
   if (key === lastSub) return;
   if (conn?.send({ type: "subscribe", eventId, snapshots })) lastSub = key;

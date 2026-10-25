@@ -1,16 +1,36 @@
 // Pestaña En vivo: captura de la salida, qué suena por capa, BPM, master y automatización.
 
 import { S } from "../store.js";
+import { cmd } from "../api.js";
 import { runnerCard } from "../runner.js";
 import { ago, h, pct, replaceKeepFocus } from "../util.js";
 
 export function createLiveTab() {
   const img = h("img", { class: "snap-img", alt: "Captura de la salida de Resolume", decoding: "async" });
   const age = h("span", { class: "snap-age mono" }, "");
-  const placeholder = h("div", { class: "snap-empty" }, "Esperando captura…");
+  const placeholder = h("div", { class: "snap-empty" }, "Toca Refrescar para ver la pantalla");
   const frame = h("div", { class: "snap-frame" }, placeholder, img, age);
+  // La captura se pide a mano para no gastar datos con una imagen cada pocos segundos.
+  const refreshBtn = h("button", { type: "button", class: "btn btn-block snap-refresh" }, "Refrescar");
+  refreshBtn.addEventListener("click", () => refresh());
   const info = h("div", { class: "live-info" });
-  const el = h("div", { class: "live" }, h("figure", { class: "snap" }, frame), info);
+  const el = h("div", { class: "live" }, h("figure", { class: "snap" }, frame), refreshBtn, info);
+
+  let loading = false;
+  async function refresh() {
+    if (loading || !S.eventId) return;
+    loading = true;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "Cargando…";
+    const r = await cmd({ action: "getSnapshot" });
+    loading = false;
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = "Refrescar";
+    if (!r.ok || typeof r.data?.data !== "string") return;
+    S.snapshot = { url: `data:${r.data.mime || "image/jpeg"};base64,${r.data.data}`, at: r.data.at };
+    S.snapClock.observe(r.data.at);
+    updateSnapshot();
+  }
 
   function updateSnapshot() {
     const snap = S.snapshot;
@@ -108,5 +128,7 @@ export function createLiveTab() {
 
   updateSnapshot();
   update();
+  // Una captura al abrir la pestaña, para no empezar en blanco.
+  if (!S.snapshot) setTimeout(() => refresh(), 300);
   return { el, update, updateSnapshot, tick };
 }

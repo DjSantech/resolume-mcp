@@ -51,6 +51,7 @@ const COMMAND_CHECKS: Record<CommandAction, (c: Obj) => boolean> = {
   stopAutomation: () => true,
   skipAutomation: () => true,
   getThumbnail: (c) => isInt(c.clipId),
+  getSnapshot: () => true,
 };
 
 export function parseCommand(v: unknown): Command | null {

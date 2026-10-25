@@ -14,6 +14,7 @@ import {
   type RClip, type RComposition, type RProduct, type ResolumeApi,
 } from "./resolume.js";
 import { AutomationStore, parseAutomation } from "./store.js";
+import { ScreenStore, parseScreenLayout, readAdvancedOutput, writeAdvancedOutput } from "./screens.js";
 
 export const BRIDGE_VERSION = "1.0.0";
 
@@ -36,6 +37,8 @@ export interface BridgeConfig {
   snapshotMs?: number;
   /** Límite por petición a Resolume, incluida la descarga (ms). Por defecto 15000. */
   resolumeTimeoutMs?: number;
+  /** Carpeta "Resolume Arena" (Preferences y Presets). Por defecto se busca en Documentos. */
+  resolumeDocs?: string;
 
   // Opciones internas (pruebas y modo local).
   /** Salida de los mensajes del puente. Por defecto console.log. */
@@ -76,6 +79,8 @@ export async function startBridge(config: BridgeConfig): Promise<Bridge> {
 class BridgeImpl {
   private readonly api: ResolumeApi;
   private readonly store: AutomationStore;
+  private readonly screens: ScreenStore;
+  private readonly resolumeDocs: string | undefined;
   private readonly runner: AutomationRunner;
   private readonly eventId: string;
   private readonly eventName: string;
@@ -136,6 +141,8 @@ class BridgeImpl {
 
     this.api = createResolumeApi(cfg.resolumeUrl ?? "http://127.0.0.1:8080", cfg.resolumeTimeoutMs ?? 15000);
     this.store = new AutomationStore(resolve(cfg.dataDir ?? "./data"), cfg.minAutomationSeconds ?? 10, (t) => this.log("warn", "puente", t));
+    this.screens = new ScreenStore(resolve(cfg.dataDir ?? "./data"), (t) => this.log("warn", "puente", t));
+    this.resolumeDocs = cfg.resolumeDocs || undefined;
     this.runner = new AutomationRunner({
       api: this.api,
       log: (level, by, text) => this.log(level, by, text),
@@ -149,6 +156,7 @@ class BridgeImpl {
 
   async start(): Promise<void> {
     await this.store.load();
+    await this.screens.load();
     this.console(`Puente "${this.eventName}" (${this.eventId}) → servidor ${this.serverUrl}`);
     await this.poll();
     this.connect();
@@ -162,6 +170,7 @@ class BridgeImpl {
     for (const [key] of this.coalesced) this.flushCoalesced(key);
     await this.polling?.catch(() => undefined);
     await this.store.flush();
+    await this.screens.flush();
     const ws = this.ws;
     this.ws = null;
     if (ws && ws.readyState !== WebSocket.CLOSED) {
@@ -336,6 +345,7 @@ class BridgeImpl {
       nowPlaying: this.nowPlaying,
       automations: this.store.list(),
       runner: this.runner.state ? structuredClone(this.runner.state) : null,
+      screens: this.screens.list(),
       updatedAt: Date.now(),
     };
   }
@@ -558,6 +568,39 @@ class BridgeImpl {
       }
       case "getSnapshot":
         return await this.captureSnapshot();
+      case "saveScreenLayout": {
+        const l = parseScreenLayout({ ...(cmd.layout ?? {}), updatedAt: Date.now() });
+        if (typeof l === "string") throw new BadCommand(l);
+        const isNew = !this.screens.get(l.id);
+        await this.screens.save(l);
+        this.log("info", by, `${isNew ? "Creó" : "Editó"} el diseño de pantalla "${l.name}"`);
+        this.publish();
+        return { id: l.id };
+      }
+      case "deleteScreenLayout": {
+        const l = await this.screens.remove(String(cmd.id ?? ""));
+        if (!l) throw new BadCommand("No existe ese diseño de pantalla");
+        this.log("info", by, `Borró el diseño de pantalla "${l.name}"`);
+        this.publish();
+        return undefined;
+      }
+      case "applyScreenLayout": {
+        const l = this.screens.get(String(cmd.id ?? ""));
+        if (!l) throw new BadCommand("No existe ese diseño de pantalla");
+        const target = cmd.target === "preferences" ? "preferences" : "preset";
+        // Resolume reescribe AdvancedOutput.xml al cerrarse: reemplazarlo con Resolume abierto no sirve.
+        if (target === "preferences" && this.resolumeOnline === true) {
+          throw new BadCommand("Cierra Resolume antes de reemplazar la Salida Avanzada, o guárdala como preset.");
+        }
+        const name = String(cmd.presetName ?? "").trim() || l.name;
+        const r = await writeAdvancedOutput(l, name, target, this.resolumeDocs);
+        this.log("info", by, target === "preset"
+          ? `Generó el preset de Salida Avanzada "${name}" (${r.slices} slices)`
+          : `Reemplazó la Salida Avanzada con "${l.name}" (${r.slices} slices)`);
+        return r;
+      }
+      case "readAdvancedOutput":
+        return await readAdvancedOutput(this.resolumeDocs);
       case "saveAutomation": {
         const a = parseAutomation({ ...(cmd.automation ?? {}), updatedAt: Date.now() }, this.minAutomationSeconds);
         if (typeof a === "string") throw new BadCommand(a);

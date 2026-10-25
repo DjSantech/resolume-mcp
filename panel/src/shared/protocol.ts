@@ -88,6 +88,49 @@ export interface RunnerState {
   loops: number;
 }
 
+// ---------------------------------------------------------------- Pantallas (mapeo de Salida Avanzada)
+// Una pantalla LED armada con gabinetes. Cada pieza es un rectángulo de gabinetes: una forma en "L" o "Γ" son dos piezas.
+
+export interface ScreenPiece {
+  id: string;
+  name: string;
+  /** Tamaño en gabinetes. */
+  cols: number;
+  rows: number;
+  /** Posición en el escenario (cómo se ve afuera), en píxeles reales desde la esquina superior izquierda. */
+  x: number;
+  y: number;
+  /** Posición en la salida (lo que recibe el procesador LED), en píxeles. El tamaño en la salida es cols×cabinetW por rows×cabinetH. */
+  outX: number;
+  outY: number;
+}
+
+export interface ScreenLayout {
+  id: string;
+  name: string;
+  /** Texto del gabinete, p. ej. "P3.9 500×500 mm". */
+  cabinetLabel: string;
+  /** Píxeles por gabinete. */
+  cabinetW: number;
+  cabinetH: number;
+  pieces: ScreenPiece[];
+  /** Tamaño de la composición de Resolume. El escenario se escala para caber, centrado. Si es igual al escenario, 1:1. */
+  composition: { width: number; height: number };
+  /** Tamaño de la salida (la pantalla/tarjeta que va al procesador LED). */
+  output: { width: number; height: number };
+  updatedAt: number;
+}
+
+/** Resumen de la Salida Avanzada que Resolume tiene guardada (Preferences/AdvancedOutput.xml). */
+export interface AdvancedOutputInfo {
+  found: boolean;
+  /** Carpeta "Resolume Arena" usada (en el PC del puente). */
+  resolumeDir: string | null;
+  composition: { width: number; height: number } | null;
+  output: { name: string; width: number; height: number } | null;
+  slices: { name: string; kind: "slice" | "polygon"; input: { x: number; y: number; w: number; h: number }; output: { x: number; y: number; w: number; h: number } }[];
+}
+
 export interface EventState {
   /** true si el puente puede hablar con Resolume. */
   resolumeOnline: boolean;
@@ -96,6 +139,8 @@ export interface EventState {
   nowPlaying: NowPlaying[];
   automations: Automation[];
   runner: RunnerState | null;
+  /** Diseños de pantalla guardados en el puente. Ausente en puentes viejos. */
+  screens?: ScreenLayout[];
   updatedAt: number;
 }
 
@@ -137,12 +182,23 @@ export type Command =
   /** Devuelve { mime, data(base64) } en el resultado. Permitido también para observadores. */
   | { action: "getThumbnail"; clipId: number }
   /** Una captura de la salida bajo demanda. Devuelve { mime, data(base64), at }. Permitido para observadores. */
-  | { action: "getSnapshot" };
+  | { action: "getSnapshot" }
+  | { action: "saveScreenLayout"; layout: Omit<ScreenLayout, "updatedAt"> }
+  | { action: "deleteScreenLayout"; id: string }
+  /**
+   * Genera la Salida Avanzada del diseño. target "preset" (por defecto): la guarda como preset en
+   * Presets/Advanced Output/<presetName>.xml para elegirla en Resolume. target "preferences": reemplaza
+   * Preferences/AdvancedOutput.xml (con copia de respaldo); solo con Resolume cerrado.
+   * Devuelve { path, slices }.
+   */
+  | { action: "applyScreenLayout"; id: string; presetName: string; target?: "preset" | "preferences" }
+  /** Lee la Salida Avanzada actual de Resolume. Devuelve AdvancedOutputInfo. Permitido para observadores. */
+  | { action: "readAdvancedOutput" };
 
 export type CommandAction = Command["action"];
 
 /** Órdenes que puede mandar un observador (solo lectura). */
-export const VIEWER_ACTIONS: readonly CommandAction[] = ["getThumbnail", "getSnapshot"];
+export const VIEWER_ACTIONS: readonly CommandAction[] = ["getThumbnail", "getSnapshot", "readAdvancedOutput"];
 
 // ---------------------------------------------------------------- Puente ⇄ Servidor
 // El puente se conecta a  /ws/bridge?event=<eventId>&name=<nombre>&token=<BRIDGE_TOKEN>

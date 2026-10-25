@@ -52,6 +52,10 @@ const COMMAND_CHECKS: Record<CommandAction, (c: Obj) => boolean> = {
   skipAutomation: () => true,
   getThumbnail: (c) => isInt(c.clipId),
   getSnapshot: () => true,
+  saveScreenLayout: (c) => isObj(c.layout) && isStr(c.layout.name, 200) && Array.isArray(c.layout.pieces),
+  deleteScreenLayout: (c) => isStr(c.id, 100),
+  applyScreenLayout: (c) => isStr(c.id, 100) && isStr(c.presetName, 200) && (c.target === undefined || c.target === "preset" || c.target === "preferences"),
+  readAdvancedOutput: () => true,
 };
 
 export function parseCommand(v: unknown): Command | null {

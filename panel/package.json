@@ -10,7 +10,7 @@
     "bridge": "node dist/bridge/main.js",
     "local": "node dist/local.js",
     "mock": "node dist/mock/mock-resolume.js",
-    "test": "npm run build && node --test dist/test/"
+    "test": "npm run build && node --test dist/test/*.test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

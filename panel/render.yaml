@@ -1,0 +1,21 @@
+# Render Blueprint del panel. El repo es resolume-mcp y el panel vive en panel/.
+# Al crear el Blueprint en Render, indicar la ruta "panel/render.yaml" (o mover este archivo a la raíz del repo).
+services:
+  - type: web
+    name: resolume-panel
+    runtime: node
+    plan: free
+    rootDir: panel
+    buildCommand: npm ci && npm run build
+    startCommand: npm run server
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ADMIN_CODE
+        sync: false
+      - key: VIEWER_CODE
+        sync: false
+      - key: BRIDGE_TOKEN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

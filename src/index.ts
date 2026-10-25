@@ -2,6 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { fitClip } from "./fit.js";
 
 // URL de la Webserver de Resolume (Preferences → Webserver). Se cambia sin recompilar.
 const RESOLUME_URL = (process.env.RESOLUME_URL ?? "http://127.0.0.1:8080").replace(/\/+$/, "");
@@ -44,8 +45,10 @@ server.tool(
   { layer: index.describe("Número de capa (1 = la de abajo)"), column: index.describe("Número de columna/clip") },
   async ({ layer, column }) => {
     try {
+      const clip = (await resolume("GET", `/composition/layers/${layer}/clips/${column}`)) as { id?: number };
+      const fitted = clip.id !== undefined ? await fitClip(resolume, clip.id).catch(() => null) : null;
       await resolume("POST", `/composition/layers/${layer}/clips/${column}/connect`);
-      return ok(`Clip lanzado: capa ${layer}, columna ${column}.`);
+      return ok(`Clip lanzado: capa ${layer}, columna ${column}.${fitted ? ` Ajustado a pantalla: ${fitted}.` : ""}`);
     } catch (e) {
       return fail(e);
     }

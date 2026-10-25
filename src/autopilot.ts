@@ -4,6 +4,8 @@
 //      node dist/autopilot.js --dry-run  → solo muestra el plan, no lanza nada
 // Ctrl+C lo detiene y deja sonando el clip actual.
 
+import { fitClip } from "./fit.js";
+
 const RESOLUME_URL = (process.env.RESOLUME_URL ?? "http://127.0.0.1:8080").replace(/\/+$/, "");
 const API = `${RESOLUME_URL}/api/v1`;
 const LAYER = Number(process.env.LAYER ?? 1);
@@ -12,6 +14,8 @@ const DECK = (process.env.DECK ?? "").trim();
 const MIN_S = Number(process.env.MIN_SECONDS ?? 120);
 const MAX_S = Number(process.env.MAX_SECONDS ?? 180);
 const DRY_RUN = process.argv.includes("--dry-run");
+// FIT=off desactiva el ajuste de tamaño antes de lanzar cada clip.
+const FIT = (process.env.FIT ?? "on").toLowerCase() !== "off";
 const RETRY_MS = 5000;
 
 type Param = { value?: unknown; max?: number } | undefined;
@@ -19,8 +23,13 @@ type Clip = { id?: number; name?: Param; connected?: Param; transport?: { positi
 type Layer = { clips?: Clip[] };
 type Deck = { name?: Param; selected?: Param };
 
-async function resolume(method: "GET" | "POST", path: string): Promise<unknown> {
-  const res = await fetch(`${API}${path}`, { method, signal: AbortSignal.timeout(5000) });
+async function resolume(method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<unknown> {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(5000),
+  });
   if (!res.ok) throw new Error(`Resolume respondió ${res.status} en ${method} ${path}`);
   const text = await res.text();
   return text ? JSON.parse(text) : null;
@@ -130,8 +139,9 @@ async function main() {
     for (const s of slots) {
       const p = planDuration(s.lengthS);
       try {
+        const fitted = FIT ? await fitClip(resolume, s.id).catch(() => null) : null;
         await resolume("POST", `/composition/clips/by-id/${s.id}/connect`);
-        console.log(`[${now()}] Col ${s.column}: ${s.name} → ${fmt(p.seconds)} (${p.how})`);
+        console.log(`[${now()}] Col ${s.column}: ${s.name} → ${fmt(p.seconds)} (${p.how})${fitted ? ` [ajustado: ${fitted}]` : ""}`);
       } catch (e) {
         console.error(`[${now()}] Falló lanzar col ${s.column} (${(e as Error).message}). Paso al siguiente.`);
         await sleep(RETRY_MS);

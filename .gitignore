@@ -3,3 +3,4 @@ dist/
 *.log
 work/
 panel/data/
+panel/panel-config.bat

@@ -34,6 +34,8 @@ export interface BridgeConfig {
   pollMs?: number;
   /** Cada cuánto manda captura de la salida si alguien mira (ms). Por defecto 3000. */
   snapshotMs?: number;
+  /** Límite por petición a Resolume, incluida la descarga (ms). Por defecto 15000. */
+  resolumeTimeoutMs?: number;
 
   // Opciones internas (pruebas y modo local).
   /** Salida de los mensajes del puente. Por defecto console.log. */
@@ -102,6 +104,8 @@ class BridgeImpl {
   private pollTimer: NodeJS.Timeout | null = null;
   private polling: Promise<void> | null = null;
   private pollAgain = false;
+  /** Lecturas fallidas seguidas: una sola (red lenta) no cuenta como desconexión. */
+  private readFailures = 0;
 
   // Capturas
   private watchSnapshots = false;
@@ -130,7 +134,7 @@ class BridgeImpl {
     this.minAutomationSeconds = cfg.minAutomationSeconds ?? 10;
     this.print = cfg.logger ?? ((line) => console.log(line));
 
-    this.api = createResolumeApi(cfg.resolumeUrl ?? "http://127.0.0.1:8080");
+    this.api = createResolumeApi(cfg.resolumeUrl ?? "http://127.0.0.1:8080", cfg.resolumeTimeoutMs ?? 15000);
     this.store = new AutomationStore(resolve(cfg.dataDir ?? "./data"), cfg.minAutomationSeconds ?? 10, (t) => this.log("warn", "puente", t));
     this.runner = new AutomationRunner({
       api: this.api,
@@ -388,10 +392,13 @@ class BridgeImpl {
       }
       if (this.resolumeOnline !== true) this.log("info", "puente", `Resolume conectado (${this.product.product} ${this.product.version})`);
       this.resolumeOnline = true;
+      this.readFailures = 0;
       this.raw = raw;
       this.composition = composition;
       this.nowPlaying = nowPlaying;
     } catch (e) {
+      // Con el último estado bueno, un fallo aislado se ignora.
+      if (++this.readFailures < 2 && this.resolumeOnline === true) return;
       if (this.resolumeOnline !== false) this.log("warn", "puente", `Sin conexión con Resolume: ${(e as Error).message}. Sigo intentando.`);
       this.resolumeOnline = false;
       this.product = null;

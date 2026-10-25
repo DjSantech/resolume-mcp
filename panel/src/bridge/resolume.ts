@@ -11,7 +11,8 @@ export interface ResolumeApi {
   binary(path: string): Promise<{ mime: string; data: Buffer }>;
 }
 
-export function createResolumeApi(baseUrl: string, timeoutMs = 5000): ResolumeApi {
+// El límite cubre también la descarga: la composición pesa ~400 KB y por un Wi-Fi lento puede tardar varios segundos.
+export function createResolumeApi(baseUrl: string, timeoutMs = 15000): ResolumeApi {
   const api = `${baseUrl.replace(/\/+$/, "")}/api/v1`;
 
   const request = async (method: Method, path: string, body?: unknown): Promise<Response> => {
@@ -36,7 +37,9 @@ export function createResolumeApi(baseUrl: string, timeoutMs = 5000): ResolumeAp
   return {
     async call(method, path, body) {
       const res = await request(method, path, body);
-      const text = await res.text();
+      const text = await res.text().catch((e: unknown) => {
+        throw new Error(networkMessage(e));
+      });
       if (!text) return null;
       try {
         return JSON.parse(text) as unknown;
@@ -47,7 +50,10 @@ export function createResolumeApi(baseUrl: string, timeoutMs = 5000): ResolumeAp
     async binary(path) {
       const res = await request("GET", path);
       const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
-      return { mime, data: Buffer.from(await res.arrayBuffer()) };
+      const buf = await res.arrayBuffer().catch((e: unknown) => {
+        throw new Error(networkMessage(e));
+      });
+      return { mime, data: Buffer.from(buf) };
     },
   };
 }

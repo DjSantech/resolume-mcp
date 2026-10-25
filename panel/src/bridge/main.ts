@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Puente del panel: lee la configuración del entorno y arranca. Ctrl+C lo detiene (el clip actual sigue sonando).
-// Variables: RESOLUME_URL, SERVER_URL, BRIDGE_TOKEN, EVENT_ID, EVENT_NAME, DATA_DIR, POLL_MS, SNAPSHOT_MS
+// Variables: RESOLUME_URL, SERVER_URL, BRIDGE_TOKEN, EVENT_ID, EVENT_NAME, DATA_DIR, POLL_MS, SNAPSHOT_MS, RESOLUME_TIMEOUT_MS
 
 import { startBridge } from "./bridge.js";
 
@@ -28,6 +28,7 @@ try {
     dataDir: env("DATA_DIR") || "./data",
     pollMs: ms("POLL_MS", 1000),
     snapshotMs: ms("SNAPSHOT_MS", 3000),
+    resolumeTimeoutMs: ms("RESOLUME_TIMEOUT_MS", 15000),
   });
 
   let stopping = false;

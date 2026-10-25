@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Panel Resolume</title>
+  <rect width="512" height="512" rx="96" fill="#0a0b0d"/>
+  <g transform="translate(96 132)">
+    <rect x="0" y="0" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="114" y="0" width="92" height="64" rx="8" fill="#ff3b30"/>
+    <rect x="228" y="0" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="0" y="86" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="114" y="86" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="228" y="86" width="92" height="64" rx="8" fill="#30d158"/>
+    <rect x="0" y="172" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="114" y="172" width="92" height="64" rx="8" fill="#1f232a"/>
+    <rect x="228" y="172" width="92" height="64" rx="8" fill="#1f232a"/>
+  </g>
+  <rect x="96" y="398" width="320" height="10" rx="5" fill="#ffb000"/>
+</svg>

@@ -2200,3 +2200,438 @@ button.clip:active {
 
 /* Botón Refrescar debajo de la captura */
 .snap-refresh { width: 100%; margin-top: 10px; }
+
+/* ================================================================== Pantallas (views/screens.js) */
+/* Cinco pestañas en la barra inferior. En escritorio la barra es flex y esto no aplica. */
+
+.tabbar-inner {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.screens {
+  display: grid;
+  gap: 14px;
+}
+
+/* Que la tabla ancha no estire la página: los hijos de grilla pueden encogerse. */
+.screens > *,
+.scr-sec > *,
+.scr-editor > * {
+  min-width: 0;
+}
+
+.scr-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+}
+
+.scr-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scr-mini {
+  position: relative;
+  width: min(100%, calc(96px * var(--ratio, 2)));
+  aspect-ratio: var(--ratio, 2);
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.scr-mini span {
+  position: absolute;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.scr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scr-actions .btn:not(.btn-icon) {
+  flex: 1;
+}
+
+.scr-actions .scr-send {
+  flex: 1 1 100%;
+}
+
+.scr-del {
+  color: #ff8a82;
+}
+
+.scr-sec {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin: 4px 0 14px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+fieldset.scr-sec {
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 14px 0 0;
+}
+
+fieldset.scr-sec > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.scr-sec-title {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.scr-ao {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scr-ao > .btn {
+  justify-self: start;
+}
+
+.scr-path-line .mono,
+.scr-path-inline {
+  overflow-wrap: anywhere;
+}
+
+/* Piezas */
+.scr-plist {
+  display: grid;
+  gap: 10px;
+}
+
+.scr-prow {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--c);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.scr-prow.is-selected {
+  border-color: var(--line-2);
+  border-left-color: var(--c);
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+
+.scr-prow .field {
+  margin: 0;
+}
+
+.scr-prow-top {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.scr-prow-top .field {
+  flex: 1;
+}
+
+.scr-prow-btns {
+  display: flex;
+  padding-bottom: 2px;
+}
+
+.scr-prow-dims {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.scr-psize {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Tablero (escenario / salida) */
+.scr-board-wrap {
+  padding: 8px;
+  background: #050607;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.scr-board {
+  position: relative;
+  width: min(100%, calc(56vh * var(--ratio, 2)));
+  aspect-ratio: var(--ratio, 2);
+  margin-inline: auto;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.scr-frame {
+  position: absolute;
+  border: 1px dashed var(--line-2);
+  pointer-events: none;
+}
+
+.scr-frame.is-output {
+  border: 1px solid var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scr-frame-label {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.scr-piece {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 2px;
+  background: var(--c);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.1;
+  text-align: center;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 1;
+}
+
+.scr-piece.is-selected {
+  outline: 2px solid var(--text);
+  outline-offset: 0;
+  z-index: 2;
+}
+
+.scr-piece.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  z-index: 3;
+}
+
+.scr-piece.is-bad {
+  border: 2px solid var(--danger);
+  background-image: repeating-linear-gradient(45deg, rgba(229, 53, 43, 0.4) 0 6px, transparent 6px 12px);
+}
+
+.scr-piece:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+  z-index: 4;
+}
+
+.is-readonly .scr-piece {
+  cursor: default;
+}
+
+.scr-piece-name,
+.scr-piece-size {
+  max-width: 100%;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.scr-piece-name {
+  font-weight: 700;
+}
+
+.scr-piece-size {
+  font-family: var(--mono);
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.scr-board-foot {
+  text-align: right;
+}
+
+.scr-viewhead,
+.scr-insp,
+.scr-comp {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scr-viewhead .field,
+.scr-insp .field,
+.scr-comp .field {
+  margin: 0;
+}
+
+.scr-stage-size {
+  font-size: 14px;
+}
+
+.scr-note-bad {
+  border-left-color: var(--danger);
+  background: #1d0d0c;
+  color: #ff8a82;
+}
+
+.scr-note-ok {
+  border-left-color: var(--ok);
+  background: var(--prev-bg);
+  color: #8ee6a5;
+}
+
+.scr-warns {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Tabla de resumen */
+.scr-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  max-width: 100%;
+}
+
+.scr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.scr-table th,
+.scr-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.scr-table tr:last-child > * {
+  border-bottom: 0;
+}
+
+.scr-table thead th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--panel-2);
+}
+
+.scr-table tbody th {
+  font-weight: 600;
+}
+
+.scr-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--c);
+  vertical-align: baseline;
+}
+
+.scr-png {
+  margin: 4px 0 6px;
+}
+
+/* Diálogo Enviar a Resolume */
+.scr-dlg-field {
+  margin-top: 16px;
+}
+
+.scr-adv {
+  margin-top: 4px;
+}
+
+.scr-adv summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scr-radios {
+  margin-bottom: 8px;
+}
+
+.scr-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.scr-radio input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--text);
+}
+
+.scr-path {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.scr-steps {
+  margin: 14px 0 10px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.scr-dlg-done {
+  margin-top: 16px;
+}
+
+@media (min-width: 720px) {
+  .scr-board {
+    width: min(100%, calc(62vh * var(--ratio, 2)));
+  }
+}
+/* ================================================================== fin Pantallas */

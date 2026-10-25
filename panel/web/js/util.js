@@ -62,6 +62,10 @@ const ICONS = {
   list: "M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1",
   check: "M5 12l5 5 9-10",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
+  screen: "M3 6h18v12H3zM3 12h18M9 6v12M15 6v12",
+  copy: "M9 9h11v11H9zM5 15H4V4h11v1",
+  download: "M12 4v11M7 10l5 5 5-5M5 20h14",
+  send: "M4 12l16-8-6 16-3-7-7-1z",
 };
 
 const SVG = "http://www.w3.org/2000/svg";

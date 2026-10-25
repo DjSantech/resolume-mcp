@@ -7,12 +7,14 @@ import { h, icon } from "../util.js";
 import { createLiveTab } from "./live.js";
 import { createClipsTab } from "./clips.js";
 import { createAutosTab } from "./autos.js";
+import { createScreensTab } from "./screens.js";
 import { createLogTab } from "./log.js";
 
 const TABS = [
   { id: "live", label: "En vivo", icon: "live" },
   { id: "clips", label: "Clips", icon: "grid" },
-  { id: "autos", label: "Automático", icon: "loop" },
+  { id: "autos", label: "Auto", icon: "loop" },
+  { id: "screens", label: "Pantallas", icon: "screen" },
   { id: "log", label: "Registro", icon: "list" },
 ];
 
@@ -25,6 +27,7 @@ export function createEventView(root, { onBack, onLogout }) {
     live: createLiveTab(),
     clips: createClipsTab(),
     autos: createAutosTab(),
+    screens: createScreensTab(),
     log: createLogTab(),
   };
   const dirty = new Set();
@@ -179,6 +182,7 @@ export function createEventView(root, { onBack, onLogout }) {
     destroy() {
       clearInterval(timer);
       views.autos.reset();
+      views.screens.reset();
     },
   };
 }

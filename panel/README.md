@@ -5,6 +5,7 @@ Panel web para ver y controlar Resolume Arena en eventos en vivo desde el celula
 - **Ver**: captura en vivo de la salida, qué suena en cada capa, BPM, master, automatización en curso y registro de quién hizo qué.
 - **Controlar**: lanzar clips y columnas, opacidad por capa, master, BPM, cambiar de pestaña, apagar capa o todo. Un interruptor **Control** evita lanzar algo por un toque accidental.
 - **Automatizar**: armar listas de visuales que se recorren en bucle (en orden o al azar, de N a M minutos cada uno) y arrancarlas, saltarlas o detenerlas desde el celular.
+- **Pantallas**: armar la pantalla LED con gabinetes (P3.9 de 128×128 px, etc.), acomodar las piezas como están en el escenario y en la salida del procesador, y generar los slices de la Salida Avanzada de Resolume sin cortarlos a mano. También descarga una plantilla PNG para diseñar. Ver [docs/PANTALLAS.md](docs/PANTALLAS.md).
 - **Roles**: código de administrador (todo) y de observador (solo mira).
 - **Varios eventos**: cada evento con su puente aparece en el mismo panel.
 

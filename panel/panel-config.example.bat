@@ -18,3 +18,5 @@ set BRIDGE_TOKEN=pega-aqui-el-bridge-token
 
 REM Captura de la salida cada N ms mientras alguien mira. Súbelo (p. ej. 8000) si el internet del evento es de datos móviles.
 set SNAPSHOT_MS=3000
+REM Carpeta "Resolume Arena" (Preferences y Presets), solo si no esta en Documentos. Ejemplo:
+REM set RESOLUME_DOCS=D:\Documentos\Resolume Arena

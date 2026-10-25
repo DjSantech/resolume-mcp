@@ -1,0 +1,26 @@
+{
+  "name": "resolume-panel",
+  "version": "1.0.0",
+  "description": "Panel web para ver y controlar Resolume Arena en eventos en vivo desde el celular",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "server": "node dist/server/main.js",
+    "bridge": "node dist/bridge/main.js",
+    "local": "node dist/local.js",
+    "mock": "node dist/mock/mock-resolume.js",
+    "test": "npm run build && node --test dist/test/"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

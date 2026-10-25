@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "resolume": {
+      "command": "node",
+      "args": ["C:\\ruta\\a\\resolume-mcp\\dist\\index.js"],
+      "env": { "RESOLUME_URL": "http://172.20.10.2:8080" }
+    }
+  }
+}

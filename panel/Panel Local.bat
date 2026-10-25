@@ -8,9 +8,12 @@ if not exist panel-config.bat (
   exit /b 1
 )
 call panel-config.bat
-if not exist dist\local.js (
-  echo Compilando el panel por primera vez...
-  call npm install && call npm run build || (pause & exit /b 1)
+REM Instala dependencias la primera vez y compila siempre: asi una version nueva descomprimida encima se usa de inmediato.
+if not exist node_modules (
+  echo Instalando dependencias por primera vez...
+  call npm install || (pause & exit /b 1)
 )
+echo Compilando...
+call npm run build || (pause & exit /b 1)
 node dist\local.js
 pause

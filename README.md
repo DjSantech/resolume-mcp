@@ -69,6 +69,8 @@ Recorre los clips cargados en una capa, en orden de columna, y vuelve a empezar.
 
 Los clips se lanzan por su id, así que si alguien cambia de pestaña en Resolume el autopiloto sigue lanzando los correctos. En cada vuelta relee la capa, por si agregaste o quitaste visuales.
 
+Antes de lanzar cada clip lo ajusta a la pantalla (`src/fit.ts`): si su proporción es parecida a la de la composición lo pone en **Fill** (llena sin bordes); si es vertical, cuadrado o muy panorámico, en **Fit** (completo, con bordes). También deja la escala del Transform del clip en 100%. Se hace en cada lanzamiento porque Resolume descarta estos ajustes hechos por la API cuando se cambia de pestaña. `FIT=off` lo desactiva. `trigger_clip` del servidor MCP hace lo mismo.
+
 ### Arrancar
 
 Doble clic en el `.bat` que corresponda:
@@ -96,6 +98,7 @@ npm run autopilot:plan
 | `DECK` | (la pestaña abierta) | Nombre de la pestaña. Si no está abierta, la abre al arrancar |
 | `LAYER` | `1` | Capa que recorre |
 | `MIN_SECONDS` / `MAX_SECONDS` | `120` / `180` | Tiempo de cada visual |
+| `FIT` | `on` | `off` para no ajustar el tamaño de los clips antes de lanzarlos |
 
 Ejemplo manual:
 
@@ -113,6 +116,7 @@ Scripts que se usaron para elegir y cargar los visuales del show. Ninguno lanza 
 | `render_thumbs.mjs` | Saca 4 miniaturas de videos que solo existen en el PC de Resolume: los carga en una casilla vacía, toma las miniaturas por la API y la vuelve a vaciar |
 | `tile_thumbs.py` | Une esas miniaturas en hojas y calcula las mismas estadísticas |
 | `setup_decks.mjs` | Carga la selección de fiesta en la capa 1 y crea la pestaña "Protocol Santech" con 15 visuales dorados y blancos |
+| `fit_clips.mjs` | Pone en Fill/Fit todos los clips de video y su escala en 100%. `--current` solo la pestaña abierta, `--layers=1` solo esas capas, `--dry-run` solo muestra |
 
 Los scripts de Python necesitan `opencv-python` y `numpy`.
 

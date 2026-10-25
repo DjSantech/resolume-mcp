@@ -15,6 +15,8 @@ PC de control  ──HTTP──▶  Resolume Arena (Webserver :8080)
 
 El PC de control y el de Resolume pueden ser el mismo o dos equipos en la misma red.
 
+**¿Quieres manejarlo desde el celular?** Mira el [panel web](panel/README.md): vista en vivo de la salida, control de clips y automatizaciones, con acceso de administrador y de observador, en local o desplegado en la nube.
+
 ## Requisitos
 
 - Node.js 18 o superior

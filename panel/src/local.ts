@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Modo local: servidor + puente en un solo proceso, para usar el panel por el Wi-Fi/hotspot del evento sin internet.
-// Variables: ADMIN_CODE (obligatorio), VIEWER_CODE, RESOLUME_URL, PORT, EVENT_ID, EVENT_NAME, DATA_DIR, SESSION_SECRET
+// Variables: ADMIN_CODE (obligatorio), VIEWER_CODE, RESOLUME_URL, PORT, EVENT_ID, EVENT_NAME, DATA_DIR, SESSION_SECRET,
+// RESOLUME_TIMEOUT_MS, RESOLUME_DOCS
 
 import { randomBytes } from "node:crypto";
 import { networkInterfaces } from "node:os";
@@ -33,6 +34,8 @@ try {
     eventId: env("EVENT_ID") || undefined,
     eventName: env("EVENT_NAME") || undefined,
     dataDir: env("DATA_DIR") || "./data",
+    resolumeTimeoutMs: Number(env("RESOLUME_TIMEOUT_MS")) || undefined,
+    resolumeDocs: env("RESOLUME_DOCS") || undefined,
   });
 
   // Direcciones para abrir desde el celular conectado a la misma red.

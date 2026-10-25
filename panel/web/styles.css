@@ -1890,6 +1890,7 @@ button.clip:active {
   margin-top: 8px;
   position: sticky;
   bottom: calc(var(--tabbar-h) + var(--safe-b));
+  z-index: 5;
   padding: 10px 0;
   background: var(--panel);
 }
@@ -2375,6 +2376,8 @@ fieldset.scr-sec > legend {
 
 .scr-board {
   position: relative;
+  /* Los z-index de las piezas quedan dentro del tablero y no tapan la barra Guardar. */
+  isolation: isolate;
   width: min(100%, calc(56vh * var(--ratio, 2)));
   aspect-ratio: var(--ratio, 2);
   margin-inline: auto;

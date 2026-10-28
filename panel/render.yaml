@@ -1,5 +1,7 @@
 # Render Blueprint del panel. El repo es resolume-mcp y el panel vive en panel/.
 # Al crear el Blueprint en Render, indicar la ruta "panel/render.yaml" (o mover este archivo a la raíz del repo).
+# Modo cuentas: definir DATABASE_URL (Postgres; con Neon agregar ?sslmode=require). Sin ella, modo códigos
+# (ADMIN_CODE + BRIDGE_TOKEN obligatorios).
 services:
   - type: web
     name: resolume-panel
@@ -11,11 +13,28 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BRAND_NAME
+        value: VisualMaping
+      - key: SUPERADMIN_EMAILS
+        sync: false
+      - key: CONTACT_WHATSAPP
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: AGENT_VERSION
+        sync: false
+      - key: AGENT_DOWNLOAD_URL
+        sync: false
+      - key: AGENT_SHA256
+        sync: false
+      # Solo modo códigos (opcionales si hay DATABASE_URL).
       - key: ADMIN_CODE
         sync: false
       - key: VIEWER_CODE
         sync: false
       - key: BRIDGE_TOKEN
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true

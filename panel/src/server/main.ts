@@ -1,4 +1,5 @@
 // Arranque del servidor desde variables de entorno.
+// Modo cuentas si hay DATABASE_URL o ACCOUNTS_STORE=memory; si no, modo códigos (ADMIN_CODE + BRIDGE_TOKEN).
 import { startServer } from "./server.js";
 
 function fail(message: string): never {
@@ -7,15 +8,28 @@ function fail(message: string): never {
 }
 
 const env = process.env;
-const adminCode = env.ADMIN_CODE?.trim() ?? "";
-const bridgeToken = env.BRIDGE_TOKEN?.trim() ?? "";
-const missing = [!adminCode && "ADMIN_CODE", !bridgeToken && "BRIDGE_TOKEN"].filter(Boolean);
-if (missing.length > 0) {
-  fail(
-    `faltan variables de entorno obligatorias: ${missing.join(", ")}.\n` +
-      "  ADMIN_CODE   = código de acceso con control total\n" +
-      "  BRIDGE_TOKEN = secreto compartido con los puentes (largo y aleatorio)",
-  );
+const val = (name: string) => env[name]?.trim() ?? "";
+
+const databaseUrl = val("DATABASE_URL");
+const accountsStore = val("ACCOUNTS_STORE");
+if (accountsStore && accountsStore !== "memory") fail(`ACCOUNTS_STORE inválido: "${accountsStore}" (solo "memory").`);
+const accountsMode = !!databaseUrl || accountsStore === "memory";
+
+const adminCode = val("ADMIN_CODE");
+const bridgeToken = val("BRIDGE_TOKEN");
+const viewerCode = val("VIEWER_CODE");
+if (!accountsMode) {
+  const missing = [!adminCode && "ADMIN_CODE", !bridgeToken && "BRIDGE_TOKEN"].filter(Boolean);
+  if (missing.length > 0) {
+    fail(
+      `faltan variables de entorno obligatorias: ${missing.join(", ")}.\n` +
+        "  ADMIN_CODE   = código de acceso con control total\n" +
+        "  BRIDGE_TOKEN = secreto compartido con los puentes (largo y aleatorio)\n" +
+        "  (o DATABASE_URL para el modo cuentas)",
+    );
+  }
+  if (bridgeToken.length < 16) console.warn("Aviso: BRIDGE_TOKEN es corto; usa al menos 16 caracteres aleatorios.");
+  if (viewerCode && viewerCode === adminCode) fail("VIEWER_CODE no puede ser igual a ADMIN_CODE.");
 }
 
 const port = Number(env.PORT ?? 3000);
@@ -25,23 +39,31 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) fail(`PORT inválido: "
 const trustProxy = env.TRUST_PROXY !== undefined ? Number(env.TRUST_PROXY) : env.RENDER ? 1 : 0;
 if (!Number.isInteger(trustProxy) || trustProxy < 0) fail(`TRUST_PROXY inválido: "${env.TRUST_PROXY}"`);
 
-const viewerCode = env.VIEWER_CODE?.trim() ?? "";
-if (bridgeToken.length < 16) console.warn("Aviso: BRIDGE_TOKEN es corto; usa al menos 16 caracteres aleatorios.");
-if (viewerCode && viewerCode === adminCode) fail("VIEWER_CODE no puede ser igual a ADMIN_CODE.");
 if (!env.SESSION_SECRET) console.warn("Aviso: SESSION_SECRET vacío; las sesiones se pierden al reiniciar.");
+if (accountsStore === "memory" && !databaseUrl) console.warn("Aviso: ACCOUNTS_STORE=memory; las cuentas se pierden al reiniciar.");
 
 try {
   const server = await startServer({
     port,
     host: env.HOST || undefined,
-    adminCode,
+    adminCode: adminCode || undefined,
     viewerCode,
-    bridgeToken,
+    bridgeToken: bridgeToken || undefined,
     sessionSecret: env.SESSION_SECRET,
     staticDir: env.STATIC_DIR || undefined,
     trustProxy,
+    databaseUrl: databaseUrl || undefined,
+    accountsStore: accountsStore === "memory" ? "memory" : undefined,
+    brandName: val("BRAND_NAME") || undefined,
+    contactWhatsapp: val("CONTACT_WHATSAPP"),
+    superadminEmails: val("SUPERADMIN_EMAILS").split(",").map((s) => s.trim()).filter(Boolean),
+    agentVersion: val("AGENT_VERSION") || undefined,
+    agentDownloadUrl: val("AGENT_DOWNLOAD_URL") || undefined,
+    agentSha256: val("AGENT_SHA256") || undefined,
+    publicUrl: val("PUBLIC_URL") || undefined,
   });
-  console.log(`Panel escuchando en el puerto ${server.port}${viewerCode ? " (con observadores)" : ""}`);
+  const mode = accountsMode ? "modo cuentas" : viewerCode ? "modo códigos, con observadores" : "modo códigos";
+  console.log(`Panel escuchando en el puerto ${server.port} (${mode})`);
 
   let stopping = false;
   const stop = (signal: string) => {

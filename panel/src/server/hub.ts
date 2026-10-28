@@ -8,6 +8,7 @@ import {
   type EventState,
   type EventSummary,
   type LogEntry,
+  type Role,
   type ServerToBridge,
   type ServerToClient,
 } from "../shared/protocol.js";
@@ -16,6 +17,8 @@ import { cleanNowPlaying, parseBridgeMessage, parseClientMessage, parseJson } fr
 
 export const CLOSE_REPLACED = 4000;
 export const CLOSE_BAD_SESSION = 4001;
+/** El PC se desvinculó. */
+export const CLOSE_REVOKED = 4003;
 
 const MAX_LOGS = 200;
 const MAX_PENDING_PER_CLIENT = 50;
@@ -29,6 +32,18 @@ export interface HubOptions {
   eventsThrottleMs: number;
   offlineTtlMs: number;
   log: LogFn;
+  /** Modo cuentas: el puente mandó hello (para guardar su versión). */
+  onHello?: (eventId: string, bridgeVersion: string) => void;
+  /** Modo cuentas: el puente se desconectó. */
+  onBridgeClose?: (eventId: string) => void;
+}
+
+/** Sesión de un cliente web. En modo cuentas lleva empresa, usuario y vencimiento del plan. */
+export interface ClientSession extends Session {
+  orgId?: string;
+  userId?: string;
+  /** ms; null = no vence. Con el plan vencido el cliente actúa como observador. */
+  planExpiresAt?: number | null;
 }
 
 interface Conn {
@@ -41,7 +56,9 @@ interface BridgeConn extends Conn {
 }
 
 interface ClientConn extends Conn {
-  session: Session;
+  session: ClientSession;
+  /** Último rol enviado en welcome. */
+  sentRole: Role;
   sub: { eventId: string | null; snapshots: boolean };
   pending: Set<string>;
 }
@@ -49,6 +66,12 @@ interface ClientConn extends Conn {
 interface EventRecord {
   id: string;
   name: string;
+  /** Empresa dueña (modo cuentas); null en modo códigos. */
+  orgId: string | null;
+  /** El nombre viene de la base: se ignora el que manda el puente. */
+  fixedName: boolean;
+  /** Existe en la base: no se borra por inactividad. */
+  persistent: boolean;
   bridge: BridgeConn | null;
   lastSeen: number;
   state: EventState | null;
@@ -96,21 +119,35 @@ export class Hub {
 
   // ------------------------------------------------------------ Puentes
 
-  addBridge(ws: WebSocket, eventId: string, name: string): void {
+  private newRecord(id: string, name: string, orgId: string | null, persistent: boolean): EventRecord {
+    return {
+      id,
+      name: cleanEventName(name, id),
+      orgId,
+      fixedName: persistent,
+      persistent,
+      bridge: null,
+      lastSeen: Date.now(),
+      state: null,
+      snapshot: null,
+      logs: [],
+      watching: false,
+      summaryKey: "",
+    };
+  }
+
+  /** opts.orgId (modo cuentas): el evento es un PC de esa empresa y su nombre viene de la base. */
+  addBridge(ws: WebSocket, eventId: string, name: string, opts: { orgId?: string } = {}): void {
     const now = Date.now();
+    const orgId = opts.orgId ?? null;
     let e = this.events.get(eventId);
+    if (e && e.orgId !== orgId) {
+      // No debería pasar (ids únicos), pero nunca se mezclan empresas.
+      this.removeEvent(eventId);
+      e = undefined;
+    }
     if (!e) {
-      e = {
-        id: eventId,
-        name: cleanEventName(name, eventId),
-        bridge: null,
-        lastSeen: now,
-        state: null,
-        snapshot: null,
-        logs: [],
-        watching: false,
-        summaryKey: "",
-      };
+      e = this.newRecord(eventId, name, orgId, orgId !== null);
       this.events.set(eventId, e);
     } else if (name) {
       e.name = cleanEventName(name, e.name);
@@ -146,6 +183,7 @@ export class Hub {
     this.failPendingFor(conn, "El evento se desconectó");
     const e = this.events.get(conn.eventId);
     if (!e || e.bridge !== conn) return;
+    this.opts.onBridgeClose?.(conn.eventId);
     e.bridge = null;
     e.lastSeen = Date.now();
     this.opts.log("info", `Puente desconectado: "${conn.eventId}"`);
@@ -168,6 +206,10 @@ export class Hub {
   private handleBridgeMessage(e: EventRecord, conn: BridgeConn, msg: BridgeToServer): void {
     switch (msg.type) {
       case "hello": {
+        if (e.fixedName) {
+          this.opts.onHello?.(e.id, msg.bridgeVersion);
+          return;
+        }
         if (msg.eventId !== e.id) {
           this.opts.log("warn", `El puente "${e.id}" dice ser "${msg.eventId.slice(0, 64)}" (ignorado)`);
           return;
@@ -190,7 +232,7 @@ export class Hub {
         e.snapshot = { mime: msg.mime, data: msg.data, at: msg.at };
         const raw = JSON.stringify({ type: "snapshot", eventId: e.id, mime: msg.mime, data: msg.data, at: msg.at });
         for (const c of this.clients) {
-          if (c.sub.eventId !== e.id || !c.sub.snapshots) continue;
+          if (c.sub.eventId !== e.id || !c.sub.snapshots || !this.visible(c, e)) continue;
           if (c.ws.readyState !== WebSocket.OPEN || c.ws.bufferedAmount > MAX_BUFFERED_FOR_SNAPSHOT) continue;
           c.ws.send(raw);
         }
@@ -217,11 +259,12 @@ export class Hub {
 
   // ------------------------------------------------------------ Clientes web
 
-  addClient(ws: WebSocket, session: Session): void {
+  addClient(ws: WebSocket, session: ClientSession): void {
     const conn: ClientConn = {
       ws,
       alive: true,
       session,
+      sentRole: this.effectiveRole(session),
       sub: { eventId: null, snapshots: false },
       pending: new Set(),
     };
@@ -234,8 +277,8 @@ export class Hub {
     ws.on("pong", () => {
       conn.alive = true;
     });
-    send(ws, { type: "welcome", role: session.role, name: session.name });
-    send(ws, { type: "events", events: this.summaries() });
+    send(ws, { type: "welcome", role: conn.sentRole, name: session.name });
+    send(ws, { type: "events", events: this.summaries(session.orgId ?? null) });
   }
 
   private onClientClose(conn: ClientConn): void {
@@ -281,7 +324,7 @@ export class Hub {
     if (prev && prev !== eventId) this.updateWatch(prev);
     if (!eventId) return;
 
-    const e = this.events.get(eventId);
+    const e = this.visibleEvent(conn, eventId);
     if (e?.state) send(conn.ws, { type: "state", eventId, state: e.state });
     if (conn.sub.snapshots && e?.snapshot) send(conn.ws, { type: "snapshot", eventId, ...e.snapshot });
     send(conn.ws, { type: "logs", eventId, entries: e ? [...e.logs] : [] });
@@ -291,10 +334,14 @@ export class Hub {
   private command(conn: ClientConn, requestId: string, eventId: string, command: Command): void {
     const fail = (error: string) => send(conn.ws, { type: "result", requestId, ok: false, error });
 
-    if (conn.session.role !== "admin" && !VIEWER_ACTIONS.includes(command.action)) {
+    if (this.effectiveRole(conn.session) !== "admin" && !VIEWER_ACTIONS.includes(command.action)) {
+      const s = conn.session;
+      if (s.role === "admin" && s.planExpiresAt != null && Date.now() >= s.planExpiresAt) {
+        return fail("Tu plan venció: solo puedes mirar. Renuévalo para volver a controlar.");
+      }
       return fail("Solo lectura: no tienes permiso para esta acción");
     }
-    const e = this.events.get(eventId);
+    const e = this.visibleEvent(conn, eventId);
     const bridge = e?.bridge;
     if (!bridge || bridge.ws.readyState !== WebSocket.OPEN) return fail("El evento no está conectado");
     if (conn.pending.size >= MAX_PENDING_PER_CLIENT) return fail("Demasiadas órdenes en curso, espera un momento");
@@ -328,9 +375,25 @@ export class Hub {
   // ------------------------------------------------------------ Capturas y resúmenes
 
   private countWatchers(eventId: string): number {
+    const e = this.events.get(eventId);
     let n = 0;
-    for (const c of this.clients) if (c.sub.eventId === eventId && c.sub.snapshots) n++;
+    for (const c of this.clients) if (c.sub.eventId === eventId && c.sub.snapshots && (!e || this.visible(c, e))) n++;
     return n;
+  }
+
+  /** Un cliente solo ve los eventos de su empresa (en modo códigos ambos son null). */
+  private visible(c: ClientConn, e: EventRecord): boolean {
+    return (c.session.orgId ?? null) === e.orgId;
+  }
+
+  private visibleEvent(c: ClientConn, eventId: string): EventRecord | undefined {
+    const e = this.events.get(eventId);
+    return e && this.visible(c, e) ? e : undefined;
+  }
+
+  private effectiveRole(s: ClientSession, now = Date.now()): Role {
+    if (s.planExpiresAt != null && now >= s.planExpiresAt) return "viewer";
+    return s.role;
   }
 
   /** Avisa al puente solo cuando pasa de 0 a >0 clientes mirando capturas, o al revés. */
@@ -344,9 +407,11 @@ export class Hub {
   }
 
   private toSubscribers(eventId: string, msg: ServerToClient): void {
+    const e = this.events.get(eventId);
+    if (!e) return;
     let raw: string | null = null;
     for (const c of this.clients) {
-      if (c.sub.eventId !== eventId || c.ws.readyState !== WebSocket.OPEN) continue;
+      if (c.sub.eventId !== eventId || c.ws.readyState !== WebSocket.OPEN || !this.visible(c, e)) continue;
       raw ??= JSON.stringify(msg);
       c.ws.send(raw);
     }
@@ -374,9 +439,10 @@ export class Hub {
     };
   }
 
-  private summaries(): EventSummary[] {
+  private summaries(orgId: string | null): EventSummary[] {
     const list: EventSummary[] = [];
     for (const e of this.events.values()) {
+      if (e.orgId !== orgId) continue;
       const core = this.summaryCore(e);
       list.push({ ...core, lastSeen: e.lastSeen });
     }
@@ -393,8 +459,17 @@ export class Hub {
       this.eventsTimer = null;
       this.lastEventsAt = Date.now();
       for (const e of this.events.values()) e.summaryKey = JSON.stringify(this.summaryCore(e));
-      const raw = JSON.stringify({ type: "events", events: this.summaries() } satisfies ServerToClient);
-      for (const c of this.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(raw);
+      const raws = new Map<string | null, string>();
+      for (const c of this.clients) {
+        if (c.ws.readyState !== WebSocket.OPEN) continue;
+        const key = c.session.orgId ?? null;
+        let raw = raws.get(key);
+        if (raw === undefined) {
+          raw = JSON.stringify({ type: "events", events: this.summaries(key) } satisfies ServerToClient);
+          raws.set(key, raw);
+        }
+        c.ws.send(raw);
+      }
     }, wait);
   }
 
@@ -405,9 +480,14 @@ export class Hub {
     const conns: Conn[] = [...this.clients];
     for (const e of this.events.values()) if (e.bridge) conns.push(e.bridge);
     for (const c of conns) {
-      if ("session" in c && (c as ClientConn).session.exp <= now) {
-        c.ws.close(CLOSE_BAD_SESSION, "Sesión vencida");
-        continue;
+      if ("session" in c) {
+        const cc = c as ClientConn;
+        if (cc.session.exp <= now) {
+          cc.ws.close(CLOSE_BAD_SESSION, "Sesión vencida");
+          continue;
+        }
+        // Si el plan venció mientras estaba conectado, se avisa el nuevo rol.
+        this.resendRole(cc, now);
       }
       if (!c.alive) {
         c.ws.terminate();
@@ -426,12 +506,108 @@ export class Hub {
   prune(now = Date.now()): void {
     let changed = false;
     for (const [id, e] of this.events) {
+      if (e.persistent) {
+        // Los PCs guardados en la base siguen en la lista; solo se suelta lo pesado.
+        if (!e.bridge && now - e.lastSeen > this.opts.offlineTtlMs) {
+          e.state = null;
+          e.snapshot = null;
+        }
+        continue;
+      }
       if (!e.bridge && now - e.lastSeen > this.opts.offlineTtlMs) {
         this.events.delete(id);
         changed = true;
       }
     }
     if (changed) this.scheduleEvents();
+  }
+
+  // ------------------------------------------------------------ Modo cuentas
+
+  private resendRole(c: ClientConn, now = Date.now()): void {
+    const role = this.effectiveRole(c.session, now);
+    if (role === c.sentRole) return;
+    c.sentRole = role;
+    send(c.ws, { type: "welcome", role, name: c.session.name });
+  }
+
+  /** Alinea los eventos de una empresa con sus PCs en la base (los desvinculados se quitan). */
+  syncOrg(orgId: string, agents: { id: string; name: string }[]): void {
+    const keep = new Set<string>();
+    let changed = false;
+    for (const a of agents) {
+      keep.add(a.id);
+      const e = this.events.get(a.id);
+      if (!e) {
+        this.events.set(a.id, this.newRecord(a.id, a.name, orgId, true));
+        changed = true;
+      } else if (e.orgId === orgId && e.name !== cleanEventName(a.name, e.name)) {
+        e.name = cleanEventName(a.name, e.name);
+        changed = true;
+      }
+    }
+    for (const [id, e] of this.events) {
+      if (e.orgId === orgId && !keep.has(id)) {
+        this.removeEvent(id);
+        changed = true;
+      }
+    }
+    if (changed) this.scheduleEvents();
+  }
+
+  /** Agrega un PC recién vinculado (fuera de línea) a la lista de su empresa. */
+  upsertEvent(orgId: string, id: string, name: string): void {
+    if (this.events.has(id)) return this.renameEvent(id, name);
+    this.events.set(id, this.newRecord(id, name, orgId, true));
+    this.scheduleEvents();
+  }
+
+  renameEvent(id: string, name: string): void {
+    const e = this.events.get(id);
+    if (!e) return;
+    e.name = cleanEventName(name, e.name);
+    this.scheduleEvents();
+  }
+
+  /** Quita el evento y cierra su puente (PC desvinculado). */
+  removeEvent(id: string): void {
+    const e = this.events.get(id);
+    if (!e) return;
+    this.events.delete(id);
+    if (e.bridge) {
+      this.failPendingFor(e.bridge, "El PC se desvinculó");
+      e.bridge.ws.close(CLOSE_REVOKED, "PC desvinculado");
+    }
+    this.scheduleEvents();
+  }
+
+  liveInfo(id: string): { online: boolean; resolumeOnline: boolean } {
+    const e = this.events.get(id);
+    const online = !!e?.bridge;
+    return { online, resolumeOnline: online && e?.state?.resolumeOnline === true };
+  }
+
+  /** Cierra las conexiones web de un usuario (sesión invalidada). */
+  closeUserClients(userId: string, reason = "Sesión inválida"): void {
+    for (const c of this.clients) if (c.session.userId === userId) c.ws.close(CLOSE_BAD_SESSION, reason);
+  }
+
+  /** Cambia en vivo el rol de un usuario (admin/viewer en el protocolo). */
+  updateUserRole(userId: string, role: Role): void {
+    for (const c of this.clients) {
+      if (c.session.userId !== userId) continue;
+      c.session = { ...c.session, role };
+      this.resendRole(c);
+    }
+  }
+
+  /** Cambia en vivo el vencimiento del plan de una empresa. */
+  updateOrgPlan(orgId: string, planExpiresAt: number | null): void {
+    for (const c of this.clients) {
+      if (c.session.orgId !== orgId) continue;
+      c.session = { ...c.session, planExpiresAt };
+      this.resendRole(c);
+    }
   }
 
   close(): void {

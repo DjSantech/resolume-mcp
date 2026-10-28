@@ -71,14 +71,24 @@ export function createStaticHandler(staticDir: string) {
   let rootPromise: Promise<string> | null = null;
   const getRoot = () => (rootPromise ??= realpath(path.resolve(staticDir)).catch(() => path.resolve(staticDir)));
 
-  return async function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+  /** fallbacks: rutas a probar en orden si `pathname` no es un archivo (p. ej. "/index.html" para /app/…). */
+  return async function serveStatic(
+    req: IncomingMessage,
+    res: ServerResponse,
+    pathname: string,
+    fallbacks: string[] = [],
+  ): Promise<void> {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.writeHead(405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" });
       res.end("Método no permitido");
       return;
     }
     const root = await getRoot();
-    const file = await resolveFile(root, pathname);
+    let file = await resolveFile(root, pathname);
+    for (const f of fallbacks) {
+      if (file) break;
+      file = await resolveFile(root, f);
+    }
     if (!file) return notFound(res);
 
     let st;

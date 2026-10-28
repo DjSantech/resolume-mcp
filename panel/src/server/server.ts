@@ -5,9 +5,17 @@ import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { createAccounts, type Accounts } from "./accounts.js";
 import { LoginLimiter, TOKEN_TTL_MS, cleanName, createToken, safeEqual, verifyToken, type Session } from "./auth.js";
-import { CLOSE_BAD_SESSION, Hub, type LogFn } from "./hub.js";
+import { clientIp, readBody, sendJson } from "./http.js";
+import { CLOSE_BAD_SESSION, Hub, type ClientSession, type LogFn } from "./hub.js";
+import { PLANS } from "./plans.js";
 import { createStaticHandler } from "./static.js";
+import { MemoryStore } from "./store/memory.js";
+import { PgStore } from "./store/pg.js";
+import type { Store } from "./store/store.js";
 import { isEventId } from "./validate.js";
 
 export interface ServerConfig {
@@ -15,10 +23,26 @@ export interface ServerConfig {
   port: number;
   /** Interfaz donde escuchar. Por defecto todas. */
   host?: string;
-  adminCode: string;
+  /** Modo códigos: obligatorio. */
+  adminCode?: string;
   /** Vacío = no hay observadores. */
   viewerCode?: string;
-  bridgeToken: string;
+  /** Modo códigos: obligatorio. */
+  bridgeToken?: string;
+  /** Modo cuentas con Postgres. */
+  databaseUrl?: string;
+  /** "memory" = modo cuentas sin base de datos (pruebas/desarrollo). */
+  accountsStore?: "memory";
+  /** Store ya creado (pruebas). Activa el modo cuentas. */
+  store?: Store;
+  brandName?: string;
+  contactWhatsapp?: string;
+  superadminEmails?: string[];
+  agentVersion?: string;
+  agentDownloadUrl?: string;
+  agentSha256?: string;
+  /** URL pública para enlaces de invitación. Vacío = derivada de la petición. */
+  publicUrl?: string;
   /** Vacío = aleatorio al arrancar (las sesiones no sobreviven reinicios). */
   sessionSecret?: string;
   /** Carpeta de la web. Por defecto `<paquete>/web`. */
@@ -76,82 +100,72 @@ const defaultLog: LogFn = (level, text) => {
   else console.error(line);
 };
 
-function sendJson(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
-  const data = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Content-Length": Buffer.byteLength(data),
-    ...extra,
-  });
-  res.end(data);
-}
-
-function readBody(req: IncomingMessage, limit: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let done = false;
-    req.on("data", (chunk: Buffer) => {
-      if (done) return;
-      size += chunk.length;
-      if (size > limit) {
-        done = true;
-        resolve(null);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      if (!done) resolve(Buffer.concat(chunks).toString("utf8"));
-    });
-    req.on("error", () => {
-      if (!done) resolve(null);
-      done = true;
-    });
-  });
-}
-
-/** IP del cliente. Con proxies confiables, la toma de X-Forwarded-For contando desde la derecha. */
-function clientIp(req: IncomingMessage, trustProxy: number): string {
-  const direct = req.socket.remoteAddress ?? "desconocida";
-  if (trustProxy <= 0) return direct;
-  const header = req.headers["x-forwarded-for"];
-  const raw = Array.isArray(header) ? header.join(",") : header;
-  if (!raw) return direct;
-  const hops = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (hops.length === 0) return direct;
-  return hops[Math.max(0, hops.length - trustProxy)] ?? direct;
-}
-
 function rejectUpgrade(socket: Duplex, status: number, text: string): void {
   socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
   socket.destroy();
 }
 
 export async function startServer(config: ServerConfig): Promise<RunningServer> {
-  if (!config.adminCode) throw new Error("Falta ADMIN_CODE: el código de administrador es obligatorio.");
-  if (!config.bridgeToken) throw new Error("Falta BRIDGE_TOKEN: el secreto de los puentes es obligatorio.");
+  const accountsMode = !!(config.store || config.databaseUrl || config.accountsStore === "memory");
+  if (!accountsMode) {
+    if (!config.adminCode) throw new Error("Falta ADMIN_CODE: el código de administrador es obligatorio.");
+    if (!config.bridgeToken) throw new Error("Falta BRIDGE_TOKEN: el secreto de los puentes es obligatorio.");
+  }
 
-  const adminCode = config.adminCode;
+  const adminCode = config.adminCode ?? "";
   const viewerCode = config.viewerCode ?? "";
-  const bridgeToken = config.bridgeToken;
+  const bridgeToken = config.bridgeToken ?? "";
   const sessionSecret = config.sessionSecret || randomBytes(32).toString("hex");
   const trustProxy = Math.max(0, Math.floor(config.trustProxy ?? 0));
   const log = config.log ?? defaultLog;
+  const brand = config.brandName?.trim() || "VisualMaping";
+  const staticDir = config.staticDir || DEFAULT_STATIC_DIR;
 
+  let accounts: Accounts | null = null;
   const hub = new Hub({
     commandTimeoutMs: config.commandTimeoutMs ?? 15_000,
     eventsThrottleMs: config.eventsThrottleMs ?? 1_000,
     offlineTtlMs: config.offlineTtlMs ?? 24 * 60 * 60 * 1000,
     log,
+    onHello: (id, v) => accounts?.onHello(id, v),
+    onBridgeClose: (id) => accounts?.onBridgeClose(id),
+  });
+
+  let store: Store | null = null;
+  if (accountsMode) {
+    store = config.store ?? (config.databaseUrl ? new PgStore(config.databaseUrl) : new MemoryStore());
+    try {
+      await store.init();
+    } catch (err) {
+      await store.close().catch(() => {});
+      throw new Error(`No se pudo preparar la base de datos: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (config.databaseUrl && !config.store) log("info", "Base de datos lista");
+    accounts = createAccounts({
+      store,
+      hub,
+      sessionSecret,
+      trustProxy,
+      superadminEmails: config.superadminEmails ?? [],
+      publicUrl: config.publicUrl?.trim() || undefined,
+      log,
+    });
+  }
+
+  const publicConfig = () => ({
+    mode: accountsMode ? "accounts" : "codes",
+    brand,
+    contactWhatsapp: (config.contactWhatsapp ?? "").replace(/\D/g, ""),
+    agent: config.agentVersion ? { version: config.agentVersion, downloadUrl: config.agentDownloadUrl ?? "" } : null,
+  });
+  const agentVersionInfo = () => ({
+    version: config.agentVersion ?? "",
+    downloadUrl: config.agentDownloadUrl ?? "",
+    sha256: config.agentSha256 ?? "",
   });
   const loginLimiter = new LoginLimiter(10, 10 * 60 * 1000);
   const bridgeLimiter = new LoginLimiter(20, 10 * 60 * 1000);
-  const serveStatic = createStaticHandler(config.staticDir || DEFAULT_STATIC_DIR);
+  const serveStatic = createStaticHandler(staticDir);
 
   /** Sesión válida, y si es observador, solo mientras haya código de observador configurado. */
   const checkSession = (token: string | null): Session | null => {
@@ -223,9 +237,32 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
       res.end(req.method === "HEAD" ? undefined : "ok");
       return;
     }
-    if (pathname === "/api/login") return void done(handleLogin(req, res));
+    const getOnly = (body: () => unknown) => {
+      if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "Método no permitido" }, { Allow: "GET" });
+      sendJson(res, 200, body());
+    };
+    if (pathname === "/api/config") return getOnly(publicConfig);
+    if (pathname === "/api/plans") return getOnly(() => PLANS);
+    if (pathname === "/api/agent/version") return getOnly(agentVersionInfo);
+    if (accounts) {
+      const acc = accounts;
+      if (pathname.startsWith("/api/")) {
+        return void done(
+          acc.handle(req, res, pathname).then((handled) => {
+            if (!handled) sendJson(res, 404, { error: "No encontrado" });
+          }),
+        );
+      }
+    } else if (pathname === "/api/login") return void done(handleLogin(req, res));
     if (pathname.startsWith("/api/") || pathname.startsWith("/ws/")) {
       return sendJson(res, 404, { error: "No encontrado" });
+    }
+    // La app vive en /app (y /app/...); en modo cuentas "/" es la portada si existe.
+    if (pathname === "/app" || pathname.startsWith("/app/")) {
+      return void done(serveStatic(req, res, pathname === "/app" ? "/app/" : pathname, ["/index.html"]));
+    }
+    if (pathname === "/" && accountsMode && existsSync(path.join(staticDir, "landing.html"))) {
+      return void done(serveStatic(req, res, "/landing.html", ["/index.html"]));
     }
     void done(serveStatic(req, res, pathname));
   });
@@ -242,6 +279,43 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
       url = new URL(req.url ?? "/", "http://localhost");
     } catch {
       return rejectUpgrade(socket, 400, "Bad Request");
+    }
+
+    const acceptClient = (session: ClientSession | null) =>
+      clientWss.handleUpgrade(req, socket, head, (ws) => {
+        // Se acepta y se cierra con código propio para que la web sepa que debe volver al ingreso.
+        if (!session) ws.close(CLOSE_BAD_SESSION, "Sesión inválida o vencida");
+        else hub.addClient(ws, session);
+      });
+
+    if (url.pathname === "/ws/bridge" && accounts) {
+      const acc = accounts;
+      const ip = clientIp(req, trustProxy);
+      if (bridgeLimiter.blockedFor(ip) > 0) return rejectUpgrade(socket, 429, "Too Many Requests");
+      const q = url.searchParams;
+      acc.bridgeAgent(q.get("agent") ?? "", q.get("secret") ?? "", q.get("version") ?? "").then(
+        (agent) => {
+          if (!agent) {
+            bridgeLimiter.fail(ip);
+            log("warn", `Agente rechazado: credenciales inválidas o PC desvinculado (${ip})`);
+            return rejectUpgrade(socket, 401, "Unauthorized");
+          }
+          bridgeWss.handleUpgrade(req, socket, head, (ws) => hub.addBridge(ws, agent.id, agent.name, { orgId: agent.orgId }));
+        },
+        (err: unknown) => {
+          log("error", `Error autenticando agente: ${err instanceof Error ? err.message : String(err)}`);
+          rejectUpgrade(socket, 503, "Service Unavailable");
+        },
+      );
+      return;
+    }
+
+    if (url.pathname === "/ws/client" && accounts) {
+      accounts.clientSession(url.searchParams.get("token")).then(acceptClient, (err: unknown) => {
+        log("error", `Error validando sesión: ${err instanceof Error ? err.message : String(err)}`);
+        rejectUpgrade(socket, 503, "Service Unavailable");
+      });
+      return;
     }
 
     if (url.pathname === "/ws/bridge") {
@@ -261,12 +335,7 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
     }
 
     if (url.pathname === "/ws/client") {
-      const session = checkSession(url.searchParams.get("token"));
-      clientWss.handleUpgrade(req, socket, head, (ws) => {
-        // Se acepta y se cierra con código propio para que la web sepa que debe volver al ingreso.
-        if (!session) ws.close(CLOSE_BAD_SESSION, "Sesión inválida o vencida");
-        else hub.addClient(ws, session);
-      });
+      acceptClient(checkSession(url.searchParams.get("token")));
       return;
     }
 
@@ -279,6 +348,7 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
       hub.prune();
       loginLimiter.prune();
       bridgeLimiter.prune();
+      accounts?.prune();
     },
     10 * 60 * 1000,
   );
@@ -306,6 +376,7 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
         hub.close();
         bridgeWss.close();
         clientWss.close();
+        if (store && !config.store) await store.close().catch(() => {});
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
           server.closeAllConnections();

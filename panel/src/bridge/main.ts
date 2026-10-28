@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Puente del panel: lee la configuración del entorno y arranca. Ctrl+C lo detiene (el clip actual sigue sonando).
-// Variables: RESOLUME_URL, SERVER_URL, BRIDGE_TOKEN, EVENT_ID, EVENT_NAME, DATA_DIR, POLL_MS, SNAPSHOT_MS, RESOLUME_TIMEOUT_MS, RESOLUME_DOCS
+// Variables: RESOLUME_URL, SERVER_URL, BRIDGE_TOKEN (o AGENT_ID + AGENT_SECRET en modo cuentas), EVENT_ID, EVENT_NAME, DATA_DIR, POLL_MS, SNAPSHOT_MS, RESOLUME_TIMEOUT_MS, RESOLUME_DOCS
 
 import { startBridge } from "./bridge.js";
 
@@ -12,7 +12,10 @@ const ms = (name: string, fallback: number) => {
 
 const serverUrl = env("SERVER_URL");
 const bridgeToken = env("BRIDGE_TOKEN");
-const missing = [!serverUrl && "SERVER_URL", !bridgeToken && "BRIDGE_TOKEN"].filter(Boolean);
+const agentId = env("AGENT_ID");
+const agentSecret = env("AGENT_SECRET");
+const agentMode = !!(agentId && agentSecret);
+const missing = [!serverUrl && "SERVER_URL", !bridgeToken && !agentMode && "BRIDGE_TOKEN (o AGENT_ID y AGENT_SECRET)"].filter(Boolean);
 if (missing.length) {
   console.error(`Falta ${missing.join(" y ")}. Ejemplo:\n  SERVER_URL=wss://mi-panel.onrender.com BRIDGE_TOKEN=... npm run bridge`);
   process.exit(1);
@@ -22,7 +25,7 @@ try {
   const bridge = await startBridge({
     resolumeUrl: env("RESOLUME_URL") || "http://127.0.0.1:8080",
     serverUrl,
-    bridgeToken,
+    ...(agentMode ? { agentId, agentSecret } : { bridgeToken }),
     eventId: env("EVENT_ID") || undefined,
     eventName: env("EVENT_NAME") || undefined,
     dataDir: env("DATA_DIR") || "./data",

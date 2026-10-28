@@ -10,7 +10,8 @@
     "bridge": "node dist/bridge/main.js",
     "local": "node dist/local.js",
     "mock": "node dist/mock/mock-resolume.js",
-    "test": "npm run build && node --test dist/test/*.test.js"
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "build:agente": "npm run build && node scripts/build-agent.mjs"
   },
   "dependencies": {
     "pg": "^8.23.1",

@@ -23,8 +23,12 @@ export interface BridgeConfig {
   resolumeUrl?: string;
   /** wss://mi-panel.onrender.com o ws://127.0.0.1:3000 */
   serverUrl: string;
-  /** Secreto compartido con el servidor. Nunca se imprime. */
-  bridgeToken: string;
+  /** Secreto compartido con el servidor (modo códigos). Nunca se imprime. */
+  bridgeToken?: string;
+  /** Modo cuentas: id del agente vinculado (alternativa a bridgeToken, junto con agentSecret). */
+  agentId?: string;
+  /** Modo cuentas: secreto del agente. Nunca se imprime. */
+  agentSecret?: string;
   /** Identificador del evento ([a-z0-9-]). Por defecto el nombre del PC. */
   eventId?: string;
   /** Nombre visible. Por defecto eventId. */
@@ -55,6 +59,31 @@ export interface BridgeConfig {
 
 export interface Bridge {
   stop(): Promise<void>;
+  /** Estado resumido (para la página local del agente). */
+  status(): BridgeStatus;
+}
+
+export interface BridgeStatus {
+  /** Conectado al servidor ahora mismo. */
+  serverConnected: boolean;
+  /** El servidor rechazó las credenciales (401/403) en el último intento. */
+  serverRejected: boolean;
+  /** Último error de conexión con el servidor (sin secretos). */
+  serverError: string;
+  resolumeOnline: boolean;
+  resolume: EventState["resolume"];
+  /** Nombre de la automatización en curso, o null. */
+  automation: string | null;
+}
+
+/** URL del WebSocket del puente: con credenciales de agente (modo cuentas) o con token (modo códigos). */
+export function bridgeWsUrl(serverUrl: string, auth: { eventId: string; eventName: string; bridgeToken?: string; agentId?: string; agentSecret?: string }): string {
+  const base = serverUrl.trim().replace(/\/+$/, "").replace(/^http(s?):\/\//i, "ws$1://");
+  if (auth.agentId && auth.agentSecret) {
+    return `${base}/ws/bridge?agent=${encodeURIComponent(auth.agentId)}&secret=${encodeURIComponent(auth.agentSecret)}`;
+  }
+  return `${base}/ws/bridge?event=${encodeURIComponent(auth.eventId)}` +
+    `&name=${encodeURIComponent(auth.eventName)}&token=${encodeURIComponent(auth.bridgeToken ?? "")}`;
 }
 
 /** Nombre del PC convertido a identificador válido. */
@@ -73,7 +102,7 @@ class BadCommand extends Error {}
 export async function startBridge(config: BridgeConfig): Promise<Bridge> {
   const bridge = new BridgeImpl(config);
   await bridge.start();
-  return { stop: () => bridge.stop() };
+  return { stop: () => bridge.stop(), status: () => bridge.status() };
 }
 
 class BridgeImpl {
@@ -86,6 +115,8 @@ class BridgeImpl {
   private readonly eventName: string;
   private readonly serverUrl: string;
   private readonly token: string;
+  private readonly agentId: string;
+  private readonly agentSecret: string;
   private readonly pollMs: number;
   private readonly snapshotMs: number;
   private readonly reconnectMinMs: number;
@@ -98,6 +129,7 @@ class BridgeImpl {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private deadTimer: NodeJS.Timeout | null = null;
   private lastConnectError = "";
+  private rejected = false;
 
   // Resolume
   private resolumeOnline: boolean | null = null;
@@ -125,13 +157,16 @@ class BridgeImpl {
 
   constructor(cfg: BridgeConfig) {
     if (!cfg.serverUrl) throw new Error("Falta SERVER_URL");
-    if (!cfg.bridgeToken) throw new Error("Falta BRIDGE_TOKEN");
+    const agentMode = !!(cfg.agentId && cfg.agentSecret);
+    if (!agentMode && !cfg.bridgeToken) throw new Error("Falta BRIDGE_TOKEN");
     const eventId = (cfg.eventId ?? "").trim().toLowerCase() || defaultEventId();
     if (!/^[a-z0-9-]{1,64}$/.test(eventId)) throw new Error(`EVENT_ID inválido: "${eventId}" (solo a-z, 0-9 y -)`);
     this.eventId = eventId;
     this.eventName = (cfg.eventName ?? "").trim().slice(0, 80) || eventId;
     this.serverUrl = cfg.serverUrl.trim().replace(/\/+$/, "").replace(/^http(s?):\/\//i, "ws$1://");
-    this.token = cfg.bridgeToken;
+    this.token = agentMode ? "" : cfg.bridgeToken ?? "";
+    this.agentId = agentMode ? cfg.agentId ?? "" : "";
+    this.agentSecret = agentMode ? cfg.agentSecret ?? "" : "";
     this.pollMs = Math.max(100, cfg.pollMs ?? 1000);
     this.snapshotMs = Math.max(100, cfg.snapshotMs ?? 3000);
     this.reconnectMinMs = Math.max(10, cfg.reconnectMinMs ?? 1000);
@@ -196,7 +231,19 @@ class BridgeImpl {
   }
 
   private redact(text: string): string {
-    return this.token ? text.split(this.token).join("***") : text;
+    for (const secret of [this.token, this.agentSecret]) if (secret) text = text.split(secret).join("***");
+    return text;
+  }
+
+  status(): BridgeStatus {
+    return {
+      serverConnected: this.ws?.readyState === WebSocket.OPEN,
+      serverRejected: this.rejected,
+      serverError: this.lastConnectError,
+      resolumeOnline: this.resolumeOnline === true,
+      resolume: this.product,
+      automation: this.runner.state?.automationName ?? null,
+    };
   }
 
   private log(level: LogEntry["level"], by: string, text: string): void {
@@ -236,8 +283,9 @@ class BridgeImpl {
 
   private connect(): void {
     if (this.stopped) return;
-    const url = `${this.serverUrl}/ws/bridge?event=${encodeURIComponent(this.eventId)}` +
-      `&name=${encodeURIComponent(this.eventName)}&token=${encodeURIComponent(this.token)}`;
+    const url = bridgeWsUrl(this.serverUrl, {
+      eventId: this.eventId, eventName: this.eventName, bridgeToken: this.token, agentId: this.agentId, agentSecret: this.agentSecret,
+    });
     let ws: WebSocket;
     try {
       ws = new WebSocket(url, { handshakeTimeout: 10_000, maxPayload: 16 * 1024 * 1024 });
@@ -254,6 +302,7 @@ class BridgeImpl {
       opened = true;
       this.backoffMs = this.reconnectMinMs;
       this.lastConnectError = "";
+      this.rejected = false;
       this.console("Conectado al servidor");
       this.armDead(ws);
       this.send({ type: "hello", eventId: this.eventId, name: this.eventName, bridgeVersion: BRIDGE_VERSION });
@@ -269,8 +318,11 @@ class BridgeImpl {
     ws.on("error", (e) => {
       // Sin este listener, ws lanza la excepción y tumba el proceso.
       const status = /Unexpected server response: (\d+)/.exec(e.message)?.[1];
-      this.lastConnectError = status === "401" || status === "403"
-        ? `el servidor rechazó el token (${status}); revisa BRIDGE_TOKEN`
+      this.rejected = status === "401" || status === "403";
+      this.lastConnectError = this.rejected
+        ? (this.agentSecret
+          ? `el servidor rechazó este PC (${status}); puede que lo hayan desvinculado desde la web`
+          : `el servidor rechazó el token (${status}); revisa BRIDGE_TOKEN`)
         : this.redact(e.message || String(e));
     });
     ws.on("close", (code) => {

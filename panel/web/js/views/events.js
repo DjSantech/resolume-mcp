@@ -2,12 +2,14 @@
 
 import { S } from "../store.js";
 import { ago, h, icon, replaceKeepFocus } from "../util.js";
+import { ROLE_LABEL } from "../rest.js";
 
 /**
  * @param {HTMLElement} root
  * @param {{ onOpen: (eventId: string) => void, onLogout: () => void }} opts
  */
-export function createEventsView(root, { onOpen, onLogout }) {
+export function createEventsView(root, { onOpen, onLogout, onAccount, onPair }) {
+  const accounts = S.cfg?.mode === "accounts";
   const list = h("div", { class: "event-list", "aria-live": "polite" });
   const who = h("span", { class: "who" });
 
@@ -21,13 +23,17 @@ export function createEventsView(root, { onOpen, onLogout }) {
         h(
           "div",
           { class: "topbar-inner wrap" },
-          h("h1", { class: "topbar-title" }, "Eventos"),
+          accounts
+            ? h("div", { class: "ev-titles" }, h("h1", { class: "ev-title" }, "Tus PCs"), h("p", { class: "ev-sub muted small" }, S.account?.me?.org?.name || ""))
+            : h("h1", { class: "topbar-title" }, "Eventos"),
           who,
-          h(
-            "button",
-            { type: "button", class: "btn btn-ghost btn-icon", "aria-label": "Cerrar sesión", onclick: onLogout },
-            icon("logout"),
-          ),
+          accounts
+            ? h("button", { type: "button", class: "btn btn-sm acct-btn", onclick: () => onAccount?.("pcs") }, icon("user"), h("span", null, "Cuenta"))
+            : h(
+                "button",
+                { type: "button", class: "btn btn-ghost btn-icon", "aria-label": "Cerrar sesión", onclick: onLogout },
+                icon("logout"),
+              ),
         ),
       ),
       h("main", { class: "wrap content" }, list),
@@ -35,9 +41,10 @@ export function createEventsView(root, { onOpen, onLogout }) {
   );
 
   function update() {
+    const acctRole = S.account?.me?.role;
     who.replaceChildren(
-      h("span", null, S.auth?.name || ""),
-      h("span", { class: `role-chip ${S.auth?.role === "admin" ? "is-admin" : ""}` }, S.auth?.role === "admin" ? "control" : "observador"),
+      accounts ? "" : h("span", null, S.auth?.name || ""),
+      h("span", { class: `role-chip ${S.auth?.role === "admin" ? "is-admin" : ""}` }, accounts && acctRole && S.auth?.role === "admin" ? ROLE_LABEL[acctRole] : S.auth?.role === "admin" ? "control" : "observador"),
     );
 
     if (!S.eventsLoaded) {
@@ -50,8 +57,11 @@ export function createEventsView(root, { onOpen, onLogout }) {
         h(
           "div",
           { class: "empty" },
-          h("p", null, h("strong", null, "No hay eventos conectados.")),
-          h("p", { class: "muted" }, "Arranca el puente en el PC del evento y aparecerá aquí."),
+          h("p", null, h("strong", null, accounts ? "Aún no tienes PCs vinculados." : "No hay eventos conectados.")),
+          h("p", { class: "muted" }, accounts ? "Instala el agente en el PC de Resolume y vincúlalo con un código." : "Arranca el puente en el PC del evento y aparecerá aquí."),
+          accounts && S.account?.me?.role !== "viewer"
+            ? h("button", { type: "button", class: "btn btn-arm empty-cta", onclick: () => onPair?.() }, icon("plus"), "Vincular un PC")
+            : null,
         ),
       );
       return;
@@ -65,7 +75,7 @@ export function createEventsView(root, { onOpen, onLogout }) {
     const live = ev.online && ev.nowPlaying.length > 0;
     const status = ev.online
       ? h("span", { class: "status status-on" }, h("span", { class: "dot" }), "En línea")
-      : h("span", { class: "status status-off" }, h("span", { class: "dot" }), `Fuera de línea · ${ago(Date.now() - ev.lastSeen)}`);
+      : h("span", { class: "status status-off" }, h("span", { class: "dot" }), ev.lastSeen ? `Fuera de línea · ${ago(Date.now() - ev.lastSeen)}` : "Nunca se ha conectado");
     const resolume = ev.online
       ? ev.resolumeOnline
         ? h("span", { class: "status status-on" }, "Resolume conectado")

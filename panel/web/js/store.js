@@ -20,6 +20,12 @@ import { ClockSync } from "./util.js";
  */
 
 export const S = {
+  /** Configuración pública (GET /api/config). */
+  cfg: { mode: "codes", brand: "", contactWhatsapp: "", agent: null },
+  /** Modo cuentas: { me } tras ingresar. */
+  account: null,
+  /** Planes (GET /api/plans). */
+  plans: [],
   /** @type {{token:string, role:Role, name:string} | null} */
   auth: null,
   /** "idle" | "connecting" | "open" | "reconnecting" */

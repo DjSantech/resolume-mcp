@@ -8,12 +8,20 @@ import { store } from "./js/util.js";
 import { renderLogin } from "./js/views/login.js";
 import { createEventsView } from "./js/views/events.js";
 import { createEventView } from "./js/views/event.js";
+import { get, loadConfig, setRestToken, setUnauthorizedHandler } from "./js/rest.js";
+import { renderAccountLogin, renderInvite, renderSignup } from "./js/views/auth.js";
+import { createAccountView, loadPlans, planWaLink } from "./js/views/account.js";
+import { h, icon } from "./js/util.js";
 
 const MAX_LOGS = 300;
-const APP_TITLE = "Panel Resolume";
+let APP_TITLE = "Panel Resolume";
 
 const view = document.getElementById("view");
 const connBanner = document.getElementById("conn-banner");
+const planBanner = document.getElementById("plan-banner");
+const isAccounts = () => S.cfg.mode === "accounts";
+let accountView = null;
+let meTimer = null;
 
 /** @type {Connection | null} */
 let conn = null;
@@ -25,7 +33,9 @@ let connTimer = null;
 
 // ---------------------------------------------------------------- Sesión
 
-function boot() {
+async function boot() {
+  S.cfg = await loadConfig();
+  if (isAccounts()) return bootAccounts();
   // Una recarga deja el historial apuntando a un evento: empezar desde la lista.
   if (history.state?.ev) history.replaceState(null, "", location.pathname + location.search);
   const token = store.get("rp.token");
@@ -41,6 +51,7 @@ function showLogin(message) {
   S.route = "login";
   document.title = APP_TITLE;
   setConnBanner(null);
+  if (isAccounts()) return showAuthScreen(message);
   renderLogin(view, { onLoggedIn, message });
 }
 
@@ -78,6 +89,13 @@ function logout(message) {
   store.remove("rp.token");
   store.remove("rp.role");
   closeEvent();
+  accountView?.destroy();
+  accountView = null;
+  S.account = null;
+  setRestToken(null);
+  clearInterval(meTimer);
+  updatePlanBanner();
+  if (history.state?.acct) history.replaceState(null, "", location.pathname + location.search);
   S.auth = null;
   S.events = [];
   eventsView = null;
@@ -176,11 +194,16 @@ window.addEventListener("online", () => conn?.nudge());
 function showEvents() {
   S.route = "events";
   document.title = APP_TITLE;
-  eventsView = createEventsView(view, { onOpen: (id) => openEvent(id), onLogout: () => logout() });
+  eventsView = createEventsView(view, {
+    onOpen: (id) => openEvent(id),
+    onLogout: () => logout(),
+    onAccount: (sec) => openAccount(sec),
+    onPair: () => openAccount("pcs", { pair: true }),
+  });
 }
 
 function maybeAutoEnter() {
-  if (autoDone || S.route !== "events") return;
+  if (autoDone || S.route !== "events" || isAccounts()) return;
   const last = store.get("rp.lastEvent");
   const lastEv = S.events.find((e) => e.eventId === last);
   const online = S.events.filter((e) => e.online);
@@ -244,6 +267,9 @@ function goBack() {
 
 window.addEventListener("popstate", () => {
   if (!S.auth) return;
+  const acct = history.state?.acct;
+  if (acct) return openAccount(acct, { push: false });
+  if (S.route === "account") return closeAccount();
   const ev = history.state?.ev;
   if (S.route === "event" && !ev) leaveEvent();
   else if (ev && ev !== S.eventId) openEvent(ev, { push: false });
@@ -257,6 +283,162 @@ function rerender() {
     eventView = createEventView(view, { onBack: goBack, onLogout: () => logout() });
     if (tab !== S.tab) emit("tab");
   } else if (S.route === "events") showEvents();
+}
+
+// ---------------------------------------------------------------- Modo cuentas
+
+async function bootAccounts() {
+  APP_TITLE = S.cfg.brand || "VisualMaping";
+  document.title = APP_TITLE;
+  document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute("content", APP_TITLE);
+  document.querySelector('link[rel="manifest"]')?.setAttribute("href", "/app.webmanifest");
+  setUnauthorizedHandler(() => logout("Tu sesión venció o ya no es válida. Ingresa de nuevo."));
+  loadPlans();
+  if (history.state?.ev || history.state?.acct) history.replaceState(null, "", location.pathname + location.search);
+  window.addEventListener("hashchange", () => {
+    if (!S.auth) showAuthScreen();
+    else if (inviteCode()) logout(); // con sesión abierta, la invitación es para otra cuenta
+  });
+  const token = store.get("rp.token");
+  if (!inviteCode() && token && !tokenExpired(token)) {
+    setRestToken(token);
+    try {
+      const me = await get("/api/me", { quiet: true });
+      return enterAccount(token, me);
+    } catch (ex) {
+      if (ex.status && ex.status !== 401) return showAuthScreen(ex.message);
+      setRestToken(null);
+      store.remove("rp.token");
+    }
+  }
+  showAuthScreen();
+}
+
+function inviteCode() {
+  const m = /^#invitacion-(.+)$/.exec(location.hash);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function showAuthScreen(message) {
+  S.route = "login";
+  document.title = APP_TITLE;
+  setConnBanner(null);
+  const done = (r, o) => onAccountLoggedIn(r, o);
+  const code = inviteCode();
+  if (code) renderInvite(view, code, { onLoggedIn: done });
+  else if (location.hash === "#registro") renderSignup(view, { onLoggedIn: done });
+  else renderAccountLogin(view, { onLoggedIn: done, message });
+}
+
+function onAccountLoggedIn(r, { welcome = false } = {}) {
+  if (!r || typeof r.token !== "string" || !r.me) return showAuthScreen("Respuesta inesperada del servidor.");
+  history.replaceState(null, "", location.pathname + location.search);
+  enterAccount(r.token, r.me);
+  if (welcome) toast(`Bienvenido a ${APP_TITLE}`, "ok", 4000);
+}
+
+/** Rol hacia el WebSocket: observador si el rol lo es o el plan venció. */
+function wsRole(me) {
+  return me.role !== "viewer" && me.plan?.active !== false ? "admin" : "viewer";
+}
+
+function enterAccount(token, me) {
+  setRestToken(token);
+  store.set("rp.token", token);
+  S.account = { me };
+  S.auth = { token, role: wsRole(me), name: me.user?.name || "" };
+  store.set("rp.role", S.auth.role);
+  store.set("rp.name", S.auth.name);
+  updatePlanBanner();
+  clearInterval(meTimer);
+  meTimer = setInterval(refreshMe, 5 * 60e3);
+  startSession();
+}
+
+async function refreshMe() {
+  if (!S.account) return;
+  try {
+    const me = await get("/api/me", { quiet: true });
+    if (!S.account) return;
+    const prev = S.account.me;
+    S.account = { me };
+    S.auth = { ...S.auth, name: me.user?.name || S.auth.name };
+    updatePlanBanner();
+    const changed = prev.plan?.active !== me.plan?.active || prev.role !== me.role || prev.org?.name !== me.org?.name;
+    if (changed && S.route === "events") showEvents();
+  } catch {
+    /* un 401 ya lleva al ingreso */
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && S.account) refreshMe();
+});
+
+function updatePlanBanner() {
+  const me = S.account?.me;
+  const plan = me?.plan;
+  let content = null;
+  if (plan && plan.active === false) {
+    planBanner.className = "plan-banner is-expired";
+    content = [
+      icon("power"),
+      h("span", { class: "plan-banner-text" }, h("strong", null, "Tu plan venció."), " Puedes mirar, pero no controlar. Tus PCs y automatizaciones siguen funcionando."),
+      S.cfg.contactWhatsapp && me.role === "owner"
+        ? h("a", { class: "btn btn-sm btn-wa", href: planWaLink(null), target: "_blank", rel: "noopener" }, "Renovar")
+        : h("button", { type: "button", class: "btn btn-sm", onclick: () => openAccount("plan") }, "Ver plan"),
+    ];
+  } else if (plan && Number.isFinite(plan.daysLeft) && plan.daysLeft <= 5) {
+    planBanner.className = "plan-banner is-soon";
+    const d = Math.max(0, Math.floor(plan.daysLeft));
+    content = [
+      h("span", { class: "plan-banner-text" }, d === 0 ? `Tu plan ${plan.name} vence hoy.` : `Te quedan ${d} ${d === 1 ? "día" : "días"} de ${plan.name}.`),
+      h("button", { type: "button", class: "btn btn-sm", onclick: () => openAccount("plan") }, "Ver planes"),
+    ];
+  }
+  planBanner.hidden = !content;
+  planBanner.replaceChildren(...(content || []));
+}
+
+function openAccount(section = "pcs", { push = true, pair = false } = {}) {
+  if (!S.account) return;
+  if (S.route === "event") closeEvent();
+  if (S.route === "account" && accountView) {
+    accountView.show(section);
+  } else {
+    S.route = "account";
+    eventsView = null;
+    accountView = createAccountView(view, {
+      section,
+      onBack: () => (history.state?.acct ? history.back() : closeAccount()),
+      onLogout: () => logout(),
+      onSection: (id) => openAccount(id),
+      refreshMe,
+      onPasswordChanged: (r) => {
+        if (r?.token) {
+          toast("Contraseña cambiada", "ok");
+          conn?.stop();
+          enterAccount(r.token, r.me || S.account.me);
+        } else logout("Contraseña cambiada. Entra con la nueva contraseña.");
+      },
+    });
+  }
+  document.title = `Cuenta · ${APP_TITLE}`;
+  if (push) {
+    const url = location.pathname + location.search;
+    if (history.state?.acct) history.replaceState({ acct: section }, "", url);
+    else history.pushState({ acct: section }, "", url);
+  }
+  window.scrollTo({ top: 0 });
+  subscribe();
+  if (pair) setTimeout(() => document.querySelector(".acct-head .btn-arm:not(:disabled)")?.click(), 400);
+}
+
+function closeAccount() {
+  accountView?.destroy();
+  accountView = null;
+  showEvents();
+  subscribe();
 }
 
 boot();

@@ -66,6 +66,8 @@ const ICONS = {
   copy: "M9 9h11v11H9zM5 15H4V4h11v1",
   download: "M12 4v11M7 10l5 5 5-5M5 20h14",
   send: "M4 12l16-8-6 16-3-7-7-1z",
+  user: "M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 21c1-4 4.5-6 8-6s7 2 8 6",
+  pc: "M3 5h18v11H3zM8 20h8M12 16v4",
 };
 
 const SVG = "http://www.w3.org/2000/svg";

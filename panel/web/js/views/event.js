@@ -75,7 +75,7 @@ export function createEventView(root, { onBack, onLogout }) {
         h(
           "div",
           { class: "topbar-inner wrap" },
-          h("button", { type: "button", class: "btn btn-ghost btn-icon", "aria-label": "Volver a eventos", onclick: onBack }, icon("back")),
+          h("button", { type: "button", class: "btn btn-ghost btn-icon", "aria-label": S.cfg?.mode === "accounts" ? "Volver a tus PCs" : "Volver a eventos", onclick: onBack }, icon("back")),
           h("div", { class: "ev-titles" }, title, sub),
           lamp,
           h("button", { type: "button", class: "btn btn-ghost btn-icon", "aria-label": "Cerrar sesión", onclick: onLogout }, icon("logout")),
